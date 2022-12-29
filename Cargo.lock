@@ -2955,6 +2955,7 @@ dependencies = [
  "thousands",
  "threadpool",
  "titlecase",
+ "unicode-segmentation",
  "url",
  "uuid",
  "vader_sentiment",
