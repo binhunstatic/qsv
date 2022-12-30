@@ -204,21 +204,12 @@ fn jsonl_escape(input: &str) -> Cow<str> {
 }
 
 #[inline]
-const fn escape_char(ch: char) -> Option<&'static str> {
-    match ch {
-        '\n' => Some(r#"\n"#),
-        '\r' => Some(r#"\r"#),
-        '"' => Some(r#"\""#),
-        _ => None,
-    }
-}
-
-#[inline]
 fn escape_grapheme(s: &str) -> Option<&'static str> {
     match s {
         "\n" => Some(r#"\n"#),
         "\r" => Some(r#"\r"#),
         "\"" => Some(r#"\""#),
+        "\r\n" => Some(r#"\r\n"#),
         _ => None,
     }
 }
