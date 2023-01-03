@@ -120,18 +120,24 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
         // check if a field has a boolean data type
         if let Some(values) = field_values_enum {
             let vals = values.as_array().unwrap();
+
             if vals.len() == 2 {
-                let val1 = vals[0].as_str().unwrap().to_string().to_lowercase();
-                let val2 = vals[1].as_str().unwrap().to_string().to_lowercase();
-                if let ("true", "false")
-                | ("false", "true")
-                | ("1", "0")
-                | ("0", "1")
-                | ("yes", "no")
-                | ("no", "yes") = (val1.as_str(), val2.as_str())
-                {
-                    field_type_vec.push("boolean".to_string());
-                    continue;
+                let raw_val1 = vals[0].as_str();
+                let raw_val2 = vals[1].as_str();
+
+                if let (Some(v1), Some(v2)) = (raw_val1, raw_val2) {
+                    let val1 = v1.to_string().to_lowercase();
+                    let val2 = v2.to_string().to_lowercase();
+                    if let ("true", "false")
+                    | ("false", "true")
+                    | ("1", "0")
+                    | ("0", "1")
+                    | ("yes", "no")
+                    | ("no", "yes") = (val1.as_str(), val2.as_str())
+                    {
+                        field_type_vec.push("boolean".to_string());
+                        continue;
+                    }
                 }
             }
         }
