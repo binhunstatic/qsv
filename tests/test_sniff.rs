@@ -231,7 +231,7 @@ fn sniff_sample() {
     "GeoAreaLabel"
   ],
   "types": [
-    "DateTime",
+    "Date",
     "Text",
     "Text",
     "Text",
@@ -282,4 +282,18 @@ fn sniff_prefer_dmy() {
     let expected = "Metadata\n========\n\tDelimiter: ,\n\tHas header row?: true\n\tNumber of preamble rows: 0\n\tQuote character: none\n\tFlexible: false\n\tIs utf-8 encoded?: true\n\nNumber of records: 100\nNumber of fields: 29\nFields:\n    0:   Unsigned  case_enquiry_id\n    1:   DateTime  open_dt\n    2:   DateTime  target_dt\n    3:   DateTime  closed_dt\n    4:   Text      ontime\n    5:   Text      case_status\n    6:   Text      closure_reason\n    7:   Text      case_title\n    8:   Text      subject\n    9:   Text      reason\n    10:  Text      type\n    11:  Text      queue\n    12:  Text      department\n    13:  Text      submittedphoto\n    14:  Boolean   closedphoto\n    15:  Text      location\n    16:  Unsigned  fire_district\n    17:  Text      pwd_district\n    18:  Unsigned  city_council_district\n    19:  Text      police_district\n    20:  Text      neighborhood\n    21:  Unsigned  neighborhood_services_district\n    22:  Text      ward\n    23:  Unsigned  precinct\n    24:  Text      location_street_name\n    25:  Unsigned  location_zipcode\n    26:  Float     latitude\n    27:  Float     longitude\n    28:  Text      source";
 
     assert_eq!(got, expected);
+}
+
+#[test]
+fn sniff_flaky_delimiter_guess() {
+    let wrk = Workdir::new("sniff_flaky_delimiter_guess");
+    let test_file = wrk.load_test_file("test_sniff_delimiter.csv");
+
+    let mut cmd = wrk.command("sniff");
+    cmd.arg("--delimiter").arg(",").arg(test_file);
+
+    // this should  ALWAYS succeed since we explicitly set the delimiter to ','
+    // about 40% OF the time for this specific file, the delimiter guesser will
+    // guess the wrong delimiter if we don't explicitly set it.
+    wrk.assert_success(&mut cmd);
 }

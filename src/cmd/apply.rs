@@ -3,7 +3,7 @@ Apply a series of transformation functions to a given CSV column. This can be us
 perform typical data-wrangling tasks and/or to harmonize some values, etc.
 
 It has six subcommands:
- * operations - 34 string, format, currency, regex & NLP operators.
+ * operations - 36 string, format, currency, regex & NLP operators.
  * emptyreplace - replace empty cells with <--replacement> string.
  * datefmt - Formats a recognized date column to a specified format using <--formatstr>.
  * dynfmt - Dynamically constructs a new column from other columns using the <--formatstr> template.
@@ -22,9 +22,9 @@ applied in order:
 Operations support multi-column transformations. Just make sure the
 number of transformed columns with the --rename option is the same. e.g.:
 
-$ qsv apply operations trim,upper col1,col2,col3 -r newcol1,newcol2,newcol3 file.csv  
+$ qsv apply operations trim,upper col1,col2,col3 -r newcol1,newcol2,newcol3 file.csv
 
-It has 34 supported operations:
+It has 36 supported operations:
 
   * len: Return string length
   * lower: Transform to lowercase
@@ -49,9 +49,17 @@ It has 34 supported operations:
       https://daringfireball.net/2008/05/title_case
   * censor: profanity filter. Add additional comma-delimited profanities with --comparand.
   * censor_check: check if profanity is detected (boolean).
-      Add additional comma-delimited profanities with -comparand. 
+      Add additional comma-delimited profanities with -comparand.
   * censor_count: count of profanities detected.
-      Add additional comma-delimited profanities with -comparand. 
+      Add additional comma-delimited profanities with -comparand.
+  * round: Round numeric values to the specified number of decimal places using
+      Midpoint Nearest Even Rounding Strategy AKA "Bankers Rounding."
+      Specify the number of decimal places with --formatstr (default: 3).
+  * thousands: Add thousands separators to numeric values.
+      Specify the separator policy with --formatstr (default: comma). The valid policies are:
+      comma, dot, space, underscore, hexfour (place a space every four hex digits) and
+      indiancomma (place a comma every two digits, except the last three digits).
+      The decimal separator can be specified with --replacement (default: '.')
   * currencytonum: Gets the numeric value of a currency. Supports currency symbols
       (e.g. $,¥,£,€,֏,₱,₽,₪,₩,ƒ,฿,₫) and strings (e.g. USD, EUR, RMB, JPY, etc.). 
       Recognizes point, comma and space separators.
@@ -88,7 +96,7 @@ Trim, then transform to uppercase the surname field and rename the column upperc
 
   $ qsv apply operations trim,upper surname -r uppercase_clean_surname file.csv
 
-Trim, then transform to uppercase the surname field and 
+Trim, then transform to uppercase the surname field and
 save it to a new column named uppercase_clean_surname.
 
   $ qsv apply operations trim,upper surname -c uppercase_clean_surname file.csv
@@ -96,7 +104,7 @@ save it to a new column named uppercase_clean_surname.
 Trim, then transform to uppercase the firstname and surname fields and
 rename the columns ufirstname and usurname.
 
-  $ qsv apply operations trim,upper firstname,surname -r ufirstname,usurname file.csv  
+  $ qsv apply operations trim,upper firstname,surname -r ufirstname,usurname file.csv
 
 Trim parentheses & brackets from the description field.
 
@@ -142,7 +150,7 @@ Replace empty cells in file.csv Measurement column with 'Unknown Measurement'.
 $ qsv apply emptyreplace --replacement 'Unknown Measurement' file.csv
 
 DATEFMT
-Formats a recognized date column to a specified format using <--formatstr>. 
+Formats a recognized date column to a specified format using <--formatstr>.
 See https://github.com/jqnatividad/belt/tree/main/dateparser#accepted-date-formats for
 recognized date formats.
 See https://docs.rs/chrono/latest/chrono/format/strftime/ for 
@@ -196,7 +204,7 @@ Create a new column 'FullName' from 'FirstName', 'MI', and 'LastName' columns:
 GEOCODE
 Geocodes to the nearest city center point given a location column
 [i.e. a column which contains a latitude, longitude WGS84 coordinate] against
-an embedded copy of the Geonames city database. 
+an embedded copy of the Geonames city database.
 
 The geocoded information is formatted based on --formatstr, returning
 it in 'city-state' format if not specified.
@@ -278,9 +286,19 @@ apply options:
                                 instead of removing it. Only used with the DATEFMT subcommand.
     -f, --formatstr=<string>    This option is used by several subcommands:
 
-                                OPERATIONS: numtocurrency
-                                  If set to "euro", will format the currency to use "." instead of ","
-                                  as separators (e.g. 1.000,00 instead of 1,000.00 )
+                                OPERATIONS: 
+                                  numtocurrency
+                                    If set to "euro", will format the currency to use "." instead of ","
+                                    as separators (e.g. 1.000,00 instead of 1,000.00 )
+
+                                  thousands
+                                    The thousands separator policy to use. The available policies are:
+                                    comma, dot, space, underscore, hexfour (place a space every four 
+                                    hex digits) and indiancomma (place a comma every two digits,
+                                    except the last three digits). (default: comma)
+
+                                  round
+                                    The number of decimal places to round to (default: 3)
 
                                 DATEFMT: The date format to use. For formats, see
                                   https://docs.rs/chrono/latest/chrono/format/strftime/
@@ -292,7 +310,7 @@ apply options:
                                 GEOCODE: the place format to use with the geocode subcommand.
                                   The available formats are:
                                   - 'city-state' (default) - e.g. Brooklyn, New York
-                                  - 'city-country' - Brooklyn, US 
+                                  - 'city-country' - Brooklyn, US
                                   - 'city-state-country' | 'city-admin1-country' - Brooklyn, New York US
                                   - 'city' - Brooklyn
                                   - 'county' | 'admin2' - Kings County
@@ -337,6 +355,7 @@ use strsim::{
     sorensen_dice,
 };
 use strum_macros::EnumString;
+use thousands::{policies, Separable, SeparatorPolicy};
 use titlecase::titlecase;
 use vader_sentiment::SentimentIntensityAnalyzer;
 use whatlang::detect;
@@ -371,6 +390,7 @@ enum Operations {
     Numtocurrency,
     Regex_Replace,
     Replace,
+    Round,
     Rtrim,
     Sentiment,
     Simdl,
@@ -383,6 +403,7 @@ enum Operations {
     Squeeze0,
     Strip_Prefix,
     Strip_Suffix,
+    Thousands,
     Titlecase,
     Trim,
     Upper,
@@ -421,10 +442,32 @@ static GEOCODER: OnceCell<ReverseGeocoder> = OnceCell::new();
 static EUDEX_COMPARAND_HASH: OnceCell<eudex::Hash> = OnceCell::new();
 static REGEX_REPLACE: OnceCell<Regex> = OnceCell::new();
 static SENTIMENT_ANALYZER: OnceCell<SentimentIntensityAnalyzer> = OnceCell::new();
+static THOUSANDS_POLICY: OnceCell<SeparatorPolicy> = OnceCell::new();
+static ROUND_PLACES: OnceCell<u32> = OnceCell::new();
 static WHATLANG_CONFIDENCE_THRESHOLD: OnceCell<f64> = OnceCell::new();
 
 // default confidence threshold for whatlang language detection - 90% confidence
 const DEFAULT_THRESHOLD: f64 = 0.9;
+
+// default number of decimal places to round to
+const DEFAULT_ROUND_PLACES: u32 = 3;
+
+// for thousands operator
+static INDIANCOMMA_POLICY: SeparatorPolicy = SeparatorPolicy {
+    separator: ",",
+    groups:    &[3, 2],
+    digits:    thousands::digits::ASCII_DECIMAL,
+};
+
+// valid subcommands
+enum ApplySubCmd {
+    Operations,
+    DateFmt,
+    DynFmt,
+    Geocode,
+    EmptyReplace,
+    CalcConv,
+}
 
 #[inline]
 fn replace_column_value(
@@ -503,23 +546,15 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
         debug!("dynfmt_fields: {dynfmt_fields:?}  dynfmt_template: {dynfmt_template}");
     }
 
-    enum ApplySubCmd {
-        Operations,
-        DateFmt,
-        DynFmt,
-        Geocode,
-        EmptyReplace,
-        CalcConv,
-    }
-
     let mut ops_vec: Vec<Operations> = Vec::new();
 
     let apply_cmd = if args.cmd_operations {
         match validate_operations(
-            &args.arg_operations.to_lowercase().split(',').collect(),
+            &args.arg_operations.split(',').collect(),
             &args.flag_comparand,
             &args.flag_replacement,
             &args.flag_new_column,
+            &args.flag_formatstr,
         ) {
             Ok(operations_vec) => ops_vec = operations_vec,
             Err(e) => return Err(e),
@@ -610,8 +645,9 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
                         }
                     }
                     ApplySubCmd::Operations => {
+                        let mut cell = String::new();
                         for col_index in sel.iter() {
-                            let mut cell = record[*col_index].to_owned();
+                            record[*col_index].clone_into(&mut cell);
                             apply_operations(
                                 &ops_vec,
                                 &mut cell,
@@ -638,8 +674,9 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
                         }
                     }
                     ApplySubCmd::DateFmt => {
+                        let mut cell = String::new();
                         for col_index in sel.iter() {
-                            let mut cell = record[*col_index].to_owned();
+                            record[*col_index].clone_into(&mut cell);
                             if !cell.is_empty() {
                                 let parsed_date = parse_with_preference(&cell, prefer_dmy);
                                 if let Ok(format_date) = parsed_date {
@@ -753,9 +790,10 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
 // and prepare operations enum vec
 fn validate_operations(
     operations: &Vec<&str>,
-    flag_comparand: &String,
-    flag_replacement: &String,
+    flag_comparand: &str,
+    flag_replacement: &str,
     flag_new_column: &Option<String>,
+    flag_formatstr: &str,
 ) -> Result<Vec<Operations>, CliError> {
     let mut censor_invokes = 0_u8;
     let mut copy_invokes = 0_u8;
@@ -869,6 +907,31 @@ fn validate_operations(
                     return fail!("--comparand (-C) is required for strip operations.");
                 }
                 strip_invokes = strip_invokes.saturating_add(1);
+            }
+            Operations::Thousands => {
+                let separator_policy = match flag_formatstr {
+                    "dot" => policies::DOT_SEPARATOR,
+                    "space" => policies::SPACE_SEPARATOR,
+                    "underscore" => policies::UNDERSCORE_SEPARATOR,
+                    "hexfour" => policies::HEX_FOUR,
+                    "indiancomma" => INDIANCOMMA_POLICY,
+                    _ => policies::COMMA_SEPARATOR,
+                };
+                if THOUSANDS_POLICY.set(separator_policy).is_err() {
+                    return fail!("Cannot initialize Thousands policy.");
+                };
+            }
+            Operations::Round => {
+                if ROUND_PLACES
+                    .set(
+                        flag_formatstr
+                            .parse::<u32>()
+                            .unwrap_or(DEFAULT_ROUND_PLACES),
+                    )
+                    .is_err()
+                {
+                    return fail!("Cannot initialize Round precision.");
+                };
             }
             Operations::Whatlang => {
                 if flag_new_column.is_none() {
@@ -1028,6 +1091,36 @@ fn apply_operations(
                 let censor = CENSOR.get().unwrap();
                 *cell = censor.count(cell).to_string();
             }
+            Operations::Thousands => {
+                if let Ok(num) = cell.parse::<f64>() {
+                    let mut temp_string = num.separate_by_policy(*THOUSANDS_POLICY.get().unwrap());
+
+                    // if there is a decimal separator (fractional part > 0.0), use the requested
+                    // decimal separator in --replacement
+                    if num.fract() > 0.0 {
+                        // if replacement is empty, use the default decimal separator (.)
+                        *cell = if replacement.is_empty() {
+                            temp_string
+                        } else {
+                            // else replace the decimal separator (last '.') w/ the requested one
+                            match temp_string.rfind('.') {
+                                Some(last_dot) => {
+                                    temp_string.replace_range(last_dot..=last_dot, replacement);
+                                    temp_string
+                                }
+                                None => temp_string,
+                            }
+                        };
+                    } else {
+                        *cell = temp_string;
+                    }
+                }
+            }
+            Operations::Round => {
+                if let Ok(num) = cell.parse::<f64>() {
+                    *cell = util::round_num(num, *ROUND_PLACES.get().unwrap());
+                }
+            }
             Operations::Currencytonum => {
                 // this is a workaround around current limitation of qsv-currency
                 // and also of upstream currency-rs, that it cannot
@@ -1154,6 +1247,8 @@ fn search_cached(cell: &str, formatstr: &str) -> Option<String> {
             let search_result = geocoder.search((lat, long));
             search_result.map(|locdetails| {
                 #[allow(clippy::match_same_arms)]
+                // match arms are evaluated in order,
+                // so we're optimizing for the most common cases first
                 match formatstr {
                     "%+" | "city-state" => format!(
                         "{name}, {admin1}",
@@ -1186,7 +1281,6 @@ fn search_cached(cell: &str, formatstr: &str) -> Option<String> {
                         cc = locdetails.record.cc
                     ),
                     "country" => locdetails.record.cc.to_string(),
-                    #[allow(clippy::match_same_arms)]
                     _ => locdetails.record.name.to_string(),
                 }
             })

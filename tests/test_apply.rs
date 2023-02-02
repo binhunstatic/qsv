@@ -1261,6 +1261,300 @@ fn apply_new_column() {
 }
 
 #[test]
+fn apply_ops_thousands() {
+    let wrk = Workdir::new("apply");
+    wrk.create(
+        "data.csv",
+        vec![
+            svec!["number"],
+            svec!["123456789"],
+            svec!["123456789.12345678"],
+            svec!["123456789.0"],
+            svec!["123456789.123"],
+            svec!["0"],
+            svec!["5"],
+            svec!["-123456789"],
+            svec!["-123456789.12345678"],
+            svec!["-123456789.0"],
+            svec!["-123456789.123"],
+            svec!["0"],
+            svec!["-5"],
+            svec!["not a number, should be ignored"],
+        ],
+    );
+    let mut cmd = wrk.command("apply");
+    cmd.arg("operations")
+        .arg("thousands")
+        .arg("number")
+        .arg("data.csv");
+
+    let got: Vec<Vec<String>> = wrk.read_stdout(&mut cmd);
+    let expected = vec![
+        svec!["number"],
+        svec!["123,456,789"],
+        svec!["123,456,789.12345678"],
+        svec!["123,456,789"],
+        svec!["123,456,789.123"],
+        svec!["0"],
+        svec!["5"],
+        svec!["-123,456,789"],
+        svec!["-123,456,789.12345678"],
+        svec!["-123,456,789"],
+        svec!["-123,456,789.123"],
+        svec!["0"],
+        svec!["-5"],
+        svec!["not a number, should be ignored"],
+    ];
+    assert_eq!(got, expected);
+}
+
+#[test]
+fn apply_ops_thousands_space() {
+    let wrk = Workdir::new("apply");
+    wrk.create(
+        "data.csv",
+        vec![
+            svec!["number"],
+            svec!["123456789"],
+            svec!["123456789.12345678"],
+            svec!["123456789.0"],
+            svec!["123456789.123"],
+            svec!["0"],
+            svec!["5"],
+            svec!["not a number, should be ignored"],
+        ],
+    );
+    let mut cmd = wrk.command("apply");
+    cmd.arg("operations")
+        .arg("thousands")
+        .arg("number")
+        .args(["--formatstr", "space"])
+        .arg("data.csv");
+
+    let got: Vec<Vec<String>> = wrk.read_stdout(&mut cmd);
+    let expected = vec![
+        svec!["number"],
+        svec!["123 456 789"],
+        svec!["123 456 789.12345678"],
+        svec!["123 456 789"],
+        svec!["123 456 789.123"],
+        svec!["0"],
+        svec!["5"],
+        svec!["not a number, should be ignored"],
+    ];
+    assert_eq!(got, expected);
+}
+
+#[test]
+fn apply_ops_thousands_indiancomma() {
+    let wrk = Workdir::new("apply");
+    wrk.create(
+        "data.csv",
+        vec![
+            svec!["number"],
+            svec!["123456789"],
+            svec!["123456789.12345678"],
+            svec!["123456789.0"],
+            svec!["123456789.123"],
+            svec!["0"],
+            svec!["5"],
+            svec!["not a number, should be ignored"],
+        ],
+    );
+    let mut cmd = wrk.command("apply");
+    cmd.arg("operations")
+        .arg("thousands")
+        .arg("number")
+        .args(["--formatstr", "indiancomma"])
+        .arg("data.csv");
+
+    let got: Vec<Vec<String>> = wrk.read_stdout(&mut cmd);
+    let expected = vec![
+        svec!["number"],
+        svec!["12,34,56,789"],
+        svec!["12,34,56,789.12345678"],
+        svec!["12,34,56,789"],
+        svec!["12,34,56,789.123"],
+        svec!["0"],
+        svec!["5"],
+        svec!["not a number, should be ignored"],
+    ];
+    assert_eq!(got, expected);
+}
+
+#[test]
+fn apply_ops_thousands_eurostyle() {
+    let wrk = Workdir::new("apply");
+    wrk.create(
+        "data.csv",
+        vec![
+            svec!["number"],
+            svec!["123456789"],
+            svec!["123456789.12345678"],
+            svec!["123456789.0"],
+            svec!["123456789.123"],
+            svec!["12345123456789.123"],
+            svec!["0"],
+            svec!["5"],
+            svec!["not a number, should be ignored"],
+        ],
+    );
+    let mut cmd = wrk.command("apply");
+    cmd.arg("operations")
+        .arg("thousands")
+        .arg("number")
+        .args(["--formatstr", "dot"])
+        .args(["--replacement", ","])
+        .arg("data.csv");
+
+    let got: Vec<Vec<String>> = wrk.read_stdout(&mut cmd);
+    let expected = vec![
+        svec!["number"],
+        svec!["123.456.789"],
+        svec!["123.456.789,12345678"],
+        svec!["123.456.789"],
+        svec!["123.456.789,123"],
+        svec!["12.345.123.456.789,123"],
+        svec!["0"],
+        svec!["5"],
+        svec!["not a number, should be ignored"],
+    ];
+    assert_eq!(got, expected);
+}
+
+#[test]
+fn apply_ops_thousands_hexfour() {
+    let wrk = Workdir::new("apply");
+    wrk.create(
+        "data.csv",
+        vec![
+            svec!["number"],
+            svec!["123456789"],
+            svec!["123456789.12345678"],
+            svec!["123456789.0"],
+            svec!["123456789.123"],
+            svec!["12345123456789.123"],
+            svec!["0"],
+            svec!["5"],
+            svec!["not a number, should be ignored"],
+        ],
+    );
+    let mut cmd = wrk.command("apply");
+    cmd.arg("operations")
+        .arg("thousands")
+        .arg("number")
+        .args(["--formatstr", "hexfour"])
+        .arg("data.csv");
+
+    let got: Vec<Vec<String>> = wrk.read_stdout(&mut cmd);
+    let expected = vec![
+        svec!["number"],
+        svec!["1 2345 6789"],
+        svec!["1 2345 6789.12345678"],
+        svec!["1 2345 6789"],
+        svec!["1 2345 6789.123"],
+        svec!["12 3451 2345 6789.123"],
+        svec!["0"],
+        svec!["5"],
+        svec!["not a number, should be ignored"],
+    ];
+    assert_eq!(got, expected);
+}
+
+#[test]
+fn apply_ops_round() {
+    let wrk = Workdir::new("apply");
+    wrk.create(
+        "data.csv",
+        vec![
+            svec!["number"],
+            svec!["123456789"],
+            svec!["123456789.12345678"],
+            svec!["123456789.0"],
+            svec!["123456789.123"],
+            svec!["123456789.12398"],
+            svec!["0"],
+            svec!["5"],
+            svec!["-123456789"],
+            svec!["-123456789.12345678"],
+            svec!["-123456789.0"],
+            svec!["-123456789.123"],
+            svec!["-123456789.12398"],
+            svec!["-0"],
+            svec!["-5"],
+            svec!["not a number, should be ignored"],
+        ],
+    );
+    let mut cmd = wrk.command("apply");
+    cmd.arg("operations")
+        .arg("round")
+        .arg("number")
+        .arg("data.csv");
+
+    let got: Vec<Vec<String>> = wrk.read_stdout(&mut cmd);
+    let expected = vec![
+        svec!["number"],
+        svec!["123456789"],
+        svec!["123456789.123"],
+        svec!["123456789"],
+        svec!["123456789.123"],
+        svec!["123456789.124"],
+        svec!["0"],
+        svec!["5"],
+        svec!["-123456789"],
+        svec!["-123456789.123"],
+        svec!["-123456789"],
+        svec!["-123456789.123"],
+        svec!["-123456789.124"],
+        svec!["0"],
+        svec!["-5"],
+        svec!["not a number, should be ignored"],
+    ];
+    assert_eq!(got, expected);
+}
+
+#[test]
+fn apply_ops_round_5places() {
+    let wrk = Workdir::new("apply");
+    wrk.create(
+        "data.csv",
+        vec![
+            svec!["number"],
+            svec!["123456789"],
+            svec!["123456789.12345678"],
+            svec!["123456789.0"],
+            svec!["123456789.123"],
+            svec!["123456789.1239876"],
+            svec!["123456789.1239844"],
+            svec!["0"],
+            svec!["5"],
+            svec!["not a number, should be ignored"],
+        ],
+    );
+    let mut cmd = wrk.command("apply");
+    cmd.arg("operations")
+        .arg("round")
+        .args(["--formatstr", "5"])
+        .arg("number")
+        .arg("data.csv");
+
+    let got: Vec<Vec<String>> = wrk.read_stdout(&mut cmd);
+    let expected = vec![
+        svec!["number"],
+        svec!["123456789"],
+        svec!["123456789.12346"],
+        svec!["123456789"],
+        svec!["123456789.123"],
+        svec!["123456789.12399"],
+        svec!["123456789.12398"],
+        svec!["0"],
+        svec!["5"],
+        svec!["not a number, should be ignored"],
+    ];
+    assert_eq!(got, expected);
+}
+
+#[test]
 fn apply_ops_currencytonum() {
     let wrk = Workdir::new("apply");
     wrk.create(
@@ -2005,6 +2299,10 @@ fn apply_datefmt() {
             svec!["July 4, 2005"],
             svec!["2021-05-01T01:17:02.604456Z"],
             svec!["This is not a date and it will not be reformatted"],
+            svec!["1511648546"],
+            svec!["-770172300"],
+            svec!["1671673426.123456789"],
+            // svec!["-770172300"],
         ],
     );
     let mut cmd = wrk.command("apply");
@@ -2019,6 +2317,53 @@ fn apply_datefmt() {
         svec!["2005-07-04"],
         svec!["2021-05-01T01:17:02.604456+00:00"],
         svec!["This is not a date and it will not be reformatted"],
+        svec!["2017-11-25T22:22:26+00:00"],
+        svec!["1945-08-05T23:15:00+00:00"],
+        svec!["2022-12-22T01:43:46.123456768+00:00"],
+    ];
+    assert_eq!(got, expected);
+}
+
+#[test]
+fn apply_datefmt_to_unixtime() {
+    let wrk = Workdir::new("apply");
+    wrk.create(
+        "data.csv",
+        vec![
+            svec!["Created Date"],
+            svec!["September 17, 2012 10:09am EST"],
+            svec!["Wed, 02 Jun 2021 06:31:39 GMT"],
+            svec!["2009-01-20 05:00 EST"],
+            svec!["July 4, 2005"],
+            svec!["2021-05-01T01:17:02.604456Z"],
+            svec!["This is not a date and it will not be reformatted"],
+            svec!["1511648546"],
+            svec!["1620021848429"],
+            svec!["1620024872717915000"],
+            svec!["1945-08-06T06:54:32.717915+00:00"],
+        ],
+    );
+    let mut cmd = wrk.command("apply");
+    cmd.arg("datefmt")
+        .arg("Created Date")
+        .arg("--formatstr")
+        .arg("%s")
+        .arg("data.csv");
+
+    let got: Vec<Vec<String>> = wrk.read_stdout(&mut cmd);
+    let expected = vec![
+        svec!["Created Date"],
+        svec!["1347894540"],
+        svec!["1622615499"],
+        svec!["1232445600"],
+        svec!["1120435200"],
+        svec!["1619831822"],
+        svec!["This is not a date and it will not be reformatted"],
+        // %s formatstr can only do unixtime in seconds, that's why there's rounding here
+        svec!["1511648546"],
+        svec!["9223372036"],
+        svec!["9223372036"],
+        svec!["-770144728"],
     ];
     assert_eq!(got, expected);
 }

@@ -1,42 +1,49 @@
 static USAGE: &str = r#"
-Computes summary statistics on CSV data.
+Compute summary statistics & infers data types for each column in a CSV.
 
 Summary statistics includes sum, min/max/range, min/max length, mean, stddev, variance,
-nullcount, quartiles, interquartile range (IQR), lower/upper fences, skewness, median, 
-cardinality, mode/s & antimode/s. Note that some statistics are expensive to compute and
-requires loading the entire file into memory, so they must be enabled explicitly. 
+nullcount, sparsity, quartiles, interquartile range (IQR), lower/upper fences, skewness, median, 
+cardinality, mode/s & antimode/s, and median absolute deviation (MAD). Note that some
+statistics requires loading the entire file into memory, so they must be enabled explicitly. 
 
 By default, the following statistics are reported for *every* column in the CSV data:
-sum, min/max/range values, min/max length, mean, stddev, variance & nullcount. The default
-set of statistics corresponds to statistics that can be computed efficiently on a stream
-of data (i.e., constant memory) and can work with arbitrarily large CSV files.
+sum, min/max/range values, min/max length, mean, stddev, variance, nullcount & sparsity.
+The default set of statistics corresponds to statistics that can be computed efficiently
+on a stream of data (i.e., constant memory) and can work with arbitrarily large CSV files.
 
 The following additional statistics require loading the entire file into memory:
-cardinality, mode/antimode, median, quartiles and its related measures 
-(Interquartile Range (IQR), lower/upper fences & skewness).
+cardinality, mode/antimode, median, MAD, quartiles and its related measures (IQR,
+lower/upper fences & skewness).
 
-Antimode is the least frequently occurring non-zero score and is the opposite of mode.
-It return "*ALL" if all the values are unique, and only returns a preview of the first
-10 antimodes, for readability purposes.
+"Antimode" is the least frequently occurring non-zero value and is the opposite of mode.
+It returns "*ALL" if all the values are unique, and only returns a preview of the first
+10 antimodes.
 
-If you need all the values of a column, run the `frequency` command with --limit set to zero.
-The tail of the resulting frequency table for each column will have all its antimode values.
-
-Each column's data type is also inferred (NULL, Integer, String, Float, Date & DateTime). 
-Note that the Date and DateTime data types are only inferred with the --infer-dates option 
-as its an expensive operation. The date formats recognized can be found at 
-https://github.com/jqnatividad/belt/tree/main/dateparser#accepted-date-formats.
+If you need all the antimode values of a column, run the `frequency` command with --limit set
+to zero. The resulting frequency table will have all the antimode values.
 
 Summary statistics for dates are also computed when --infer-dates is enabled, with DateTime
-results in rfc3339 format and Date results in "yyyy-mm-dd" format. Date range & stddev are 
-returned in days, not seconds. Date variance is currently not computed as the current
-streaming variance algorithm is not well suited to unix epoch timestamp values.
+results in rfc3339 format and Date results in "yyyy-mm-dd" format in the UTC timezone.
+Date range, stddev, MAD & IQR are returned in days, not timestamp milliseconds. Date variance
+is currently not computed as the current streaming variance algorithm is not well suited to 
+unix epoch timestamp values.
 
+Each column's data type is also inferred (NULL, Integer, String, Float, Date & DateTime).
 Unlike the sniff command, stats' data type inferences are GUARANTEED, as the entire file
 is scanned, and not just sampled.
 
+Note that the Date and DateTime data types are only inferred with the --infer-dates option 
+as its an expensive operation to match a date candidate against 19 possible date formats,
+with each format, having several variants.
+
+The date formats recognized and its sub-variants along with examples can be found at 
+https://github.com/jqnatividad/belt/tree/main/dateparser#accepted-date-formats.
+
 Computing statistics on a large file can be made much faster if you create an index for it
 first with 'qsv index' to enable multithreading.
+
+For examples, see the "boston311" test files in https://github.com/jqnatividad/qsv/tree/master/resources/test
+and https://github.com/jqnatividad/qsv/blob/f7f9c4297fb3dea685b5d0f631932b6b2ca4a99a/tests/test_stats.rs#L544.
 
 Usage:
     qsv stats [options] [<input>]
@@ -49,19 +56,22 @@ stats options:
                               into 'qsv stats' will disable the use of indexing.
     --everything              Show all statistics available.
     --typesonly               Infer data types only and do not compute statistics.
-                              Automatically turns on --infer-dates for all columns.
-    --mode                    Show the mode/s. Multimodal-aware.
+                              Note that if you want to infer dates, you'll still need to use
+                              the --infer-dates and --dates-whitelist options.
+    --mode                    Show the mode/s & antimode/s. Multimodal-aware.
                               This requires loading all CSV data in memory.
     --cardinality             Show the cardinality.
                               This requires loading all CSV data in memory.
     --median                  Show the median.
+                              This requires loading all CSV data in memory.
+    --mad                     Shows the median absolute deviation (MAD).
                               This requires loading all CSV data in memory.
     --quartiles               Show the quartiles, the IQR, the lower/upper inner/outer
                               fences and skewness.
                               This requires loading all CSV data in memory.
     --round <decimal_places>  Round statistics to <decimal_places>. Rounding is done following
                               Midpoint Nearest Even (aka "Bankers Rounding") rule.
-                              Date range & stddev are always at least 5 decimal places as
+                              For dates - range, stddev & IQR are always at least 5 decimal places as
                               they are reported in days, and 5 places gives us millisecond precision.
                               [default: 4]
     --nulls                   Include NULLs in the population size for computing
@@ -95,6 +105,22 @@ Common options:
     -d, --delimiter <arg>  The field delimiter for reading CSV data.
                            Must be a single character. (default: ,)
 "#;
+
+// DEVELOPER NOTE: stats is heavily optimized and makes extensive use of "unsafe" calls.
+// It is a central command, that is used by `schema`/`validate`, `tojsonl` and Datapusher+.
+//
+// It was the primary reason I created the qsv fork as I needed to do GUARANTEED data type
+// inferencing & to compile smart Data Dictionaries in the most performant way possible
+// for Datapusher+ (https://github.com/dathere/datapusher-plus).
+//
+// It underpins the `schema` and `validate` commands - enabling the automatic creation of
+// a JSONschema based on a CSV's summary statistics; and use the generated JSONschema to
+// quickly validate complex CSVs (NYC's 311 data) at almost 300,000 records/sec.
+//
+// These "unsafe" calls primarily skip repetitive UTF-8 validation and unneeded bounds checking.
+//
+// To safeguard against undefined behavior, `stats` is the most extensively tested command,
+// with ~470 tests.
 
 use std::{
     borrow::ToOwned,
@@ -130,6 +156,7 @@ pub struct Args {
     pub flag_mode:            bool,
     pub flag_cardinality:     bool,
     pub flag_median:          bool,
+    pub flag_mad:             bool,
     pub flag_quartiles:       bool,
     pub flag_round:           u32,
     pub flag_nulls:           bool,
@@ -144,21 +171,30 @@ pub struct Args {
 
 static INFER_DATE_FLAGS: once_cell::sync::OnceCell<Vec<bool>> = OnceCell::new();
 static DMY_PREFERENCE: AtomicBool = AtomicBool::new(false);
+static RECORD_COUNT: once_cell::sync::OnceCell<u64> = OnceCell::new();
+
+// number of milliseconds per day
+const MS_IN_DAY: f64 = 86_400_000.0;
+// number of decimal places when rounding days
+// 5 decimal places give us millisecond precision
+const DAY_DECIMAL_PLACES: u32 = 5;
 
 pub fn run(argv: &[&str]) -> CliResult<()> {
     let mut args: Args = util::get_args(USAGE, argv)?;
     if args.flag_typesonly {
-        args.flag_infer_dates = true;
-        args.flag_dates_whitelist = String::from("all");
         args.flag_everything = false;
         args.flag_mode = false;
         args.flag_cardinality = false;
         args.flag_median = false;
         args.flag_quartiles = false;
+        args.flag_mad = false;
     }
 
     let mut wtr = Config::new(&args.flag_output).writer()?;
-    let (headers, stats) = match args.rconfig().indexed()? {
+    let fconfig = args.rconfig();
+    let record_count = RECORD_COUNT.get_or_init(|| util::count_rows(&fconfig).unwrap());
+    log::info!("scanning {record_count} records...");
+    let (headers, stats) = match fconfig.indexed()? {
         None => args.sequential_stats(&args.flag_dates_whitelist),
         Some(idx) => {
             if let Some(num_jobs) = args.flag_jobs {
@@ -318,6 +354,7 @@ impl Args {
                 dist:          !self.flag_typesonly,
                 cardinality:   self.flag_everything || self.flag_cardinality,
                 median:        !self.flag_everything && self.flag_median && !self.flag_quartiles,
+                mad:           self.flag_everything || self.flag_mad,
                 quartiles:     self.flag_everything || self.flag_quartiles,
                 mode:          self.flag_everything || self.flag_mode,
                 typesonly:     self.flag_typesonly,
@@ -332,8 +369,8 @@ impl Args {
             return csv::StringRecord::from(vec!["field", "type"]);
         }
 
-        // with --everything, we have 28 columns at most
-        let mut fields = Vec::with_capacity(28);
+        // with --everything, we have 30 columns at most
+        let mut fields = Vec::with_capacity(30);
         fields.extend_from_slice(&[
             "field",
             "type",
@@ -347,10 +384,14 @@ impl Args {
             "stddev",
             "variance",
             "nullcount",
+            "sparsity",
         ]);
         let all = self.flag_everything;
         if self.flag_median && !self.flag_quartiles && !all {
             fields.push("median");
+        }
+        if self.flag_mad || all {
+            fields.push("mad");
         }
         if self.flag_quartiles || all {
             fields.extend_from_slice(&[
@@ -439,6 +480,7 @@ struct WhichStats {
     dist:          bool,
     cardinality:   bool,
     median:        bool,
+    mad:           bool,
     quartiles:     bool,
     mode:          bool,
     typesonly:     bool,
@@ -460,26 +502,9 @@ pub struct Stats {
     nullcount: u64,
     modes:     Option<Unsorted<Vec<u8>>>,
     median:    Option<Unsorted<f64>>,
+    mad:       Option<Unsorted<f64>>,
     quartiles: Option<Unsorted<f64>>,
     which:     WhichStats,
-}
-
-fn round_num(dec_f64: f64, places: u32) -> String {
-    use rust_decimal::prelude::*;
-
-    // use from_f64_retain, so we have all the excess bits before rounding with
-    // round_dp_with_strategy as from_f64 will prematurely round when it drops the excess bits
-    let Some(dec_num) = Decimal::from_f64_retain(dec_f64) else {
-        let msg = format!(r#"Failed to convert to decimal "{dec_f64}""#);
-        log::error!("{msg}");
-        return msg;
-    };
-
-    // round using Midpoint Nearest Even Rounding Strategy AKA "Bankers Rounding."
-    // https://docs.rs/rust_decimal/latest/rust_decimal/enum.RoundingStrategy.html#variant.MidpointNearestEven
-    dec_num
-        .round_dp_with_strategy(places, RoundingStrategy::MidpointNearestEven)
-        .to_string()
 }
 
 fn timestamp_ms_to_rfc3339(timestamp: i64, typ: FieldType) -> String {
@@ -491,6 +516,8 @@ fn timestamp_ms_to_rfc3339(timestamp: i64, typ: FieldType) -> String {
     )
     .to_rfc3339();
 
+    // if type = Date, only return the date component
+    // do not return the time component
     if typ == TDate {
         return date_val[..10].to_string();
     }
@@ -499,8 +526,8 @@ fn timestamp_ms_to_rfc3339(timestamp: i64, typ: FieldType) -> String {
 
 impl Stats {
     fn new(which: WhichStats) -> Stats {
-        let (mut sum, mut minmax, mut online, mut modes, mut median, mut quartiles) =
-            (None, None, None, None, None, None);
+        let (mut sum, mut minmax, mut online, mut modes, mut median, mut quartiles, mut mad) =
+            (None, None, None, None, None, None, None);
         if which.sum {
             sum = Some(TypedSum::default());
         }
@@ -518,6 +545,9 @@ impl Stats {
         } else if which.median {
             median = Some(stats::Unsorted::default());
         }
+        if which.mad {
+            mad = Some(stats::Unsorted::default());
+        }
         Stats {
             typ: FieldType::default(),
             sum,
@@ -526,6 +556,7 @@ impl Stats {
             nullcount: 0,
             modes,
             median,
+            mad,
             quartiles,
             which,
         }
@@ -533,10 +564,10 @@ impl Stats {
 
     #[inline]
     fn add(&mut self, sample: &[u8], infer_dates: bool) {
-        let sample_type = FieldType::from_sample(infer_dates, sample, self.typ);
+        let (sample_type, timestamp_val) = FieldType::from_sample(infer_dates, sample, self.typ);
         self.typ.merge(sample_type);
 
-        // we're doing typesonly, don't compute statistics
+        // we're inferring typesonly, don't add samples to compute statistics
         if self.which.typesonly {
             return;
         }
@@ -546,7 +577,12 @@ impl Stats {
             v.add(t, sample);
         };
         if let Some(v) = self.minmax.as_mut() {
-            v.add(t, sample);
+            if let Some(ts_val) = timestamp_val {
+                let mut buffer = itoa::Buffer::new();
+                v.add(t, buffer.format(ts_val).as_bytes());
+            } else {
+                v.add(t, sample);
+            }
         };
         if let Some(v) = self.modes.as_mut() {
             v.add(sample.to_vec());
@@ -574,6 +610,9 @@ impl Stats {
                     if let Some(v) = self.median.as_mut() {
                         v.add(n);
                     }
+                    if let Some(v) = self.mad.as_mut() {
+                        v.add(n);
+                    }
                     if let Some(v) = self.quartiles.as_mut() {
                         v.add(n);
                     }
@@ -589,13 +628,17 @@ impl Stats {
                             v.add_null();
                         };
                     }
-                } else if let Ok(parsed_date) = parse_with_preference(
-                    std::str::from_utf8(sample).unwrap(),
-                    DMY_PREFERENCE.load(Ordering::Relaxed),
-                ) {
+                // if ts_val.is_some() then we successfully inferred a date from the sample
+                // and the timestamp value is not None
+                } else if let Some(ts_val) = timestamp_val {
+                    // calculate date statistics by adding date samples as timestamps to
+                    // millisecond precision.
                     #[allow(clippy::cast_precision_loss)]
-                    let n = parsed_date.timestamp_millis() as f64;
+                    let n = ts_val as f64;
                     if let Some(v) = self.median.as_mut() {
+                        v.add(n);
+                    }
+                    if let Some(v) = self.mad.as_mut() {
                         v.add(n);
                     }
                     if let Some(v) = self.quartiles.as_mut() {
@@ -606,8 +649,8 @@ impl Stats {
                     }
                 }
             }
-            TString => { // do nothing for String type
-            }
+            // do nothing for String type
+            TString => {}
         }
     }
 
@@ -620,8 +663,8 @@ impl Stats {
 
         let typ = self.typ;
         // prealloc memory for performance
-        // we have 28 columns at most with --everything
-        let mut pieces = Vec::with_capacity(28);
+        // we have 30 columns at most with --everything
+        let mut pieces = Vec::with_capacity(30);
         let empty = String::new;
 
         // type
@@ -630,8 +673,11 @@ impl Stats {
         // sum
         if let Some(sum) = self.sum.as_ref().and_then(|sum| sum.show(typ)) {
             if typ == FieldType::TFloat {
-                let f64_val = sum.parse::<f64>().unwrap();
-                pieces.push(round_num(f64_val, round_places));
+                if let Ok(f64_val) = sum.parse::<f64>() {
+                    pieces.push(util::round_num(f64_val, round_places));
+                } else {
+                    pieces.push(format!("ERROR: Cannot convert {sum} to a float."));
+                }
             } else {
                 pieces.push(sum);
             }
@@ -655,7 +701,12 @@ impl Stats {
         }
 
         // min/max length
-        if let Some(mm) = self.minmax.as_ref().and_then(TypedMinMax::len_range) {
+        if typ == FieldType::TDate || typ == FieldType::TDateTime {
+            // returning min/max length for dates doesn't make sense
+            // especially since we convert the date stats to rfc3339 format
+            pieces.push(empty());
+            pieces.push(empty());
+        } else if let Some(mm) = self.minmax.as_ref().and_then(TypedMinMax::len_range) {
             pieces.push(mm.0);
             pieces.push(mm.1);
         } else {
@@ -664,24 +715,23 @@ impl Stats {
         }
 
         // mean, stddev & variance
-        if !(typ == TFloat || typ == TInteger || typ == TDateTime || typ == TDate) {
+        if typ == TString || typ == TNull {
             pieces.push(empty());
             pieces.push(empty());
             pieces.push(empty());
         } else if let Some(ref v) = self.online {
             if self.typ == TFloat || self.typ == TInteger {
-                pieces.push(round_num(v.mean(), round_places));
-                pieces.push(round_num(v.stddev(), round_places));
-                pieces.push(round_num(v.variance(), round_places));
+                pieces.push(util::round_num(v.mean(), round_places));
+                pieces.push(util::round_num(v.stddev(), round_places));
+                pieces.push(util::round_num(v.variance(), round_places));
             } else {
                 pieces.push(timestamp_ms_to_rfc3339(v.mean() as i64, typ));
                 // instead of returning stdev in seconds, let's return it in
                 // days as it easier to handle
-                // 86_400_000 = number of milliseconds in a day.
-                // Round to at least 5 decimal places
-                pieces.push(round_num(
-                    v.stddev() / 86_400_000.0_f64,
-                    u32::max(round_places, 5),
+                // Round to at least 5 decimal places, so we have millisecond precision
+                pieces.push(util::round_num(
+                    v.stddev() / MS_IN_DAY,
+                    u32::max(round_places, DAY_DECIMAL_PLACES),
                 ));
                 // we don't know how to compute variance on timestamps
                 // it appears the current algorithm we use is not suited to the large timestamp
@@ -701,20 +751,52 @@ impl Stats {
         let mut buffer = itoa::Buffer::new();
         pieces.push(buffer.format(self.nullcount).to_owned());
 
+        // sparsity
+        // stats is also called by the `schema` and `tojsonl` commands to infer a schema,
+        // sparsity is not required by those cmds and we don't necessarily have the
+        // record_count when called by those cmds, so just set sparsity to nullcount
+        // (div by 1) so we don't panic.
+        #[allow(clippy::cast_precision_loss)]
+        let sparsity: f64 = self.nullcount as f64 / *RECORD_COUNT.get().unwrap_or(&1) as f64;
+        pieces.push(util::round_num(sparsity, round_places));
+
         // median
+        let mut existing_median = None;
         if let Some(v) = self.median.as_mut().and_then(|v| {
             if let TNull | TString = typ {
                 None
             } else {
-                v.median()
+                existing_median = v.median();
+                existing_median
             }
         }) {
             if typ == TDateTime || typ == TDate {
                 pieces.push(timestamp_ms_to_rfc3339(v as i64, typ));
             } else {
-                pieces.push(round_num(v, round_places));
+                pieces.push(util::round_num(v, round_places));
             }
         } else if self.which.median {
+            pieces.push(empty());
+        }
+
+        // median absolute deviation (MAD)
+        if let Some(v) = self.mad.as_mut().and_then(|v| {
+            if let TNull | TString = typ {
+                None
+            } else {
+                v.mad(existing_median)
+            }
+        }) {
+            if typ == TDateTime || typ == TDate {
+                // like stddev, return MAD in days
+                pieces.push(util::round_num(
+                    v / MS_IN_DAY,
+                    u32::max(round_places, DAY_DECIMAL_PLACES),
+                ));
+            } else {
+                pieces.push(util::round_num(v, round_places));
+            }
+        } else if self.which.mad {
             pieces.push(empty());
         }
 
@@ -756,33 +838,44 @@ impl Stats {
 
                 // calculate skewness using Quantile-based measures
                 // https://en.wikipedia.org/wiki/Skewness#Quantile-based_measures
-                // skewness = (q3 - (2.0 * q2) + q1) / iqr
+                // https://blogs.sas.com/content/iml/2017/07/19/quantile-skewness.html
+                // quantile skewness = ((q3 - q2) - (q2 - q1)) / iqr;
+                // which is also (q3 - (2.0 * q2) + q1) / iqr
+                // which in turn, is the basis of the fused multiply add version below
                 let skewness = (2.0f64.mul_add(-q2, q3) + q1) / iqr;
 
                 if typ == TDateTime || typ == TDate {
+                    // casting from f64 to i64 is OK, per
+                    // https://doc.rust-lang.org/reference/expressions/operator-expr.html#numeric-cast
+                    // as values larger/smaller than what i64 can handle will automatically
+                    // saturate to i64 max/min values.
                     pieces.push(timestamp_ms_to_rfc3339(lof as i64, typ));
                     pieces.push(timestamp_ms_to_rfc3339(lif as i64, typ));
 
                     pieces.push(timestamp_ms_to_rfc3339(q1 as i64, typ));
                     pieces.push(timestamp_ms_to_rfc3339(q2 as i64, typ)); // q2 = median
                     pieces.push(timestamp_ms_to_rfc3339(q3 as i64, typ));
-                    pieces.push(round_num(iqr, round_places));
+                    // return iqr in days - there are 86,400,000 ms in a day
+                    pieces.push(util::round_num(
+                        (q3 - q1) / MS_IN_DAY,
+                        u32::max(round_places, DAY_DECIMAL_PLACES),
+                    ));
 
                     pieces.push(timestamp_ms_to_rfc3339(uif as i64, typ));
                     pieces.push(timestamp_ms_to_rfc3339(uof as i64, typ));
                 } else {
-                    pieces.push(round_num(lof, round_places));
-                    pieces.push(round_num(lif, round_places));
+                    pieces.push(util::round_num(lof, round_places));
+                    pieces.push(util::round_num(lif, round_places));
 
-                    pieces.push(round_num(q1, round_places));
-                    pieces.push(round_num(q2, round_places)); // q2 = median
-                    pieces.push(round_num(q3, round_places));
-                    pieces.push(round_num(iqr, round_places));
+                    pieces.push(util::round_num(q1, round_places));
+                    pieces.push(util::round_num(q2, round_places)); // q2 = median
+                    pieces.push(util::round_num(q3, round_places));
+                    pieces.push(util::round_num(iqr, round_places));
 
-                    pieces.push(round_num(uif, round_places));
-                    pieces.push(round_num(uof, round_places));
+                    pieces.push(util::round_num(uif, round_places));
+                    pieces.push(util::round_num(uof, round_places));
                 }
-                pieces.push(round_num(skewness, round_places));
+                pieces.push(util::round_num(skewness, round_places));
             }
         }
 
@@ -806,8 +899,7 @@ impl Stats {
                 }
                 if self.which.mode {
                     // mode/s
-                    let (modes_result, mode_occurrences) = v.modes();
-                    let modes_count = modes_result.len();
+                    let (modes_result, modes_count, mode_occurrences) = v.modes();
                     let modes_list = modes_result
                         .iter()
                         .map(|c| String::from_utf8_lossy(c))
@@ -826,24 +918,24 @@ impl Stats {
                     } else {
                         let (antimodes_result, antimodes_count, antimode_occurrences) =
                             v.antimodes();
-                        let mut antimodes_list;
+                        let mut antimodes_list = String::new();
 
-                        // We only show the first 10 antimodes
+                        // We only store the first 10 antimodes
+                        // so if antimodes_count > 10, add the "*PREVIEW: " prefix
                         if antimodes_count > 10 {
-                            antimodes_list = "*PREVIEW: ".to_string();
-                            let preview = antimodes_result
-                                .iter()
-                                .map(|c| String::from_utf8_lossy(c))
-                                .take(10)
-                                .join(",");
-                            antimodes_list.push_str(&preview);
-                        } else {
-                            antimodes_list = antimodes_result
-                                .iter()
-                                .map(|c| String::from_utf8_lossy(c))
-                                .join(",");
+                            antimodes_list.push_str("*PREVIEW: ");
                         }
-                        // and truncate at 100 characters and add an ellipsis
+
+                        let antimodes_vals = &antimodes_result
+                            .iter()
+                            .map(|c| String::from_utf8_lossy(c))
+                            .join(",");
+                        if antimodes_vals.starts_with(',') {
+                            antimodes_list.push_str("NULL");
+                        }
+                        antimodes_list.push_str(antimodes_vals);
+
+                        // and truncate at 100 characters with an ellipsis
                         if antimodes_list.len() > 100 {
                             antimodes_list.truncate(100);
                             antimodes_list.push_str("...");
@@ -876,8 +968,12 @@ impl Commute for Stats {
 }
 
 #[allow(clippy::enum_variant_names)]
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Default)]
 pub enum FieldType {
+    // The default - TNull, is the most specific type.
+    // Type inference proceeds by assuming the most specific type and then
+    // relaxing the type as counter-examples are found.
+    #[default]
     TNull,
     TString,
     TFloat,
@@ -887,14 +983,21 @@ pub enum FieldType {
 }
 
 impl FieldType {
+    // infer data type
+    // infer_dates signals if date inference should be attempted
+    // from a given sample & current type inference
     #[inline]
-    pub fn from_sample(infer_dates: bool, sample: &[u8], current_type: FieldType) -> FieldType {
+    pub fn from_sample(
+        infer_dates: bool,
+        sample: &[u8],
+        current_type: FieldType,
+    ) -> (FieldType, Option<i64>) {
         if sample.is_empty() {
-            return TNull;
+            return (TNull, None);
         }
         // no need to do type checking if current_type is already a String
         if current_type == FieldType::TString {
-            return FieldType::TString;
+            return (FieldType::TString, None);
         }
 
         // we skip utf8 validation since we say we only work with utf8
@@ -907,13 +1010,13 @@ impl FieldType {
             if let Ok(int_val) = string.parse::<i64>() {
                 // leading zero, its a string
                 if string.starts_with('0') && int_val != 0 {
-                    return TString;
+                    return (TString, None);
                 }
-                return TInteger;
+                return (TInteger, None);
             }
 
             if string.parse::<f64>().is_ok() {
-                return TFloat;
+                return (TFloat, None);
             }
         }
 
@@ -927,19 +1030,23 @@ impl FieldType {
             {
                 // get date in rfc3339 format, if it ends with "T00:00:00+00:00"
                 // its a Date type, otherwise, its DateTime.
+                let ts_val = parsed_date.timestamp_millis();
                 if parsed_date.to_rfc3339().ends_with("T00:00:00+00:00") {
-                    return TDate;
+                    return (TDate, Some(ts_val));
                 }
-                return TDateTime;
+                return (TDateTime, Some(ts_val));
             }
         }
-        TString
+        (TString, None)
     }
 }
 
 impl Commute for FieldType {
     #[inline]
     #[allow(clippy::match_same_arms)]
+    // we allow match_same_arms because we want are optimizing for
+    // performance and not readability, as match arms are evaluated in order
+    // so we want to put the most common cases first
     fn merge(&mut self, other: FieldType) {
         *self = match (*self, other) {
             (TString, TString) => TString,
@@ -955,15 +1062,6 @@ impl Commute for FieldType {
             // anything else is a String
             (_, _) => TString,
         };
-    }
-}
-
-impl Default for FieldType {
-    // The default is the most specific type.
-    // Type inference proceeds by assuming the most specific type and then
-    // relaxing the type as counter-examples are found.
-    fn default() -> FieldType {
-        TNull
     }
 }
 
@@ -1095,7 +1193,6 @@ impl TypedMinMax {
                 let n = unsafe {
                     str::from_utf8_unchecked(sample)
                         .parse::<f64>()
-                        .ok()
                         .unwrap_unchecked()
                 };
 
@@ -1106,7 +1203,6 @@ impl TypedMinMax {
                 let n = unsafe {
                     str::from_utf8_unchecked(sample)
                         .parse::<i64>()
-                        .ok()
                         .unwrap_unchecked()
                 };
                 self.integers.add(n);
@@ -1114,14 +1210,12 @@ impl TypedMinMax {
                 self.floats.add(n as f64);
             }
             TDate | TDateTime => {
-                let dt = unsafe {
-                    parse_with_preference(
-                        &String::from_utf8_lossy(sample),
-                        DMY_PREFERENCE.load(Ordering::Relaxed),
-                    )
-                    .unwrap_unchecked()
+                let n = unsafe {
+                    str::from_utf8_unchecked(sample)
+                        .parse::<i64>()
+                        .unwrap_unchecked()
                 };
-                self.dates.add(dt.timestamp_millis());
+                self.dates.add(n);
             }
         }
     }
@@ -1168,7 +1262,7 @@ impl TypedMinMax {
                     Some((
                         buffer.format(*min).to_owned(),
                         buffer.format(*max).to_owned(),
-                        round_num(*max - *min, round_places),
+                        util::round_num(*max - *min, round_places),
                     ))
                 } else {
                     None
@@ -1179,10 +1273,10 @@ impl TypedMinMax {
                     Some((
                         timestamp_ms_to_rfc3339(*min, typ),
                         timestamp_ms_to_rfc3339(*max, typ),
-                        // 86_400_000 = number of milliseconds per day
+                        // return in days, not timestamp in milliseconds
                         #[allow(clippy::cast_precision_loss)]
-                        round_num(
-                            (*max - *min) as f64 / 86_400_000.0_f64,
+                        util::round_num(
+                            (*max - *min) as f64 / MS_IN_DAY,
                             u32::max(round_places, 5),
                         ),
                     ))
@@ -1205,7 +1299,8 @@ impl Commute for TypedMinMax {
     }
 }
 
-#[inline]
+#[allow(clippy::inline_always)]
+#[inline(always)]
 fn from_bytes<T: FromStr>(bytes: &[u8]) -> T {
     // we don't need to do UTF-8 validation as qsv requires UTF-8 encoding
     unsafe { str::from_utf8_unchecked(bytes).parse().unwrap_unchecked() }

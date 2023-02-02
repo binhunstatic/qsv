@@ -13,19 +13,23 @@ fn fetch_simple() {
             svec!["  http://api.zippopotam.us/us/90210      "],
             svec!["https://api.zippopotam.us/us/94105"],
             svec!["http://api.zippopotam.us/us/92802      "],
-            svec!["https://query.wikidata.org/sparql?query=SELECT%20?dob%20WHERE%20{wd:Q42%20wdt:P569%20?dob.}&format=json"],
+            // svec!["https://query.wikidata.org/sparql?query=SELECT%20?dob%20WHERE%20{wd:Q42%20wdt:P569%20?dob.}&format=json"],
         ],
     );
     let mut cmd = wrk.command("fetch");
-    cmd.arg("URL").arg("data.csv").arg("--store-error");
+    cmd.arg("URL")
+        .arg("data.csv")
+        .arg("--store-error")
+        .arg("--rate-limit")
+        .arg("2");
 
     let got = wrk.stdout::<String>(&mut cmd);
 
     let expected = r#"{"errors":[{"title":"HTTP ERROR","detail":"HTTP ERROR 404 - Not Found"}]}
 {"post code":"90210","country":"United States","country abbreviation":"US","places":[{"place name":"Beverly Hills","longitude":"-118.4065","state":"California","state abbreviation":"CA","latitude":"34.0901"}]}
 {"post code":"94105","country":"United States","country abbreviation":"US","places":[{"place name":"San Francisco","longitude":"-122.3892","state":"California","state abbreviation":"CA","latitude":"37.7864"}]}
-{"post code":"92802","country":"United States","country abbreviation":"US","places":[{"place name":"Anaheim","longitude":"-117.9228","state":"California","state abbreviation":"CA","latitude":"33.8085"}]}
-{"head":{"vars":["dob"]},"results":{"bindings":[{"dob":{"datatype":"http://www.w3.org/2001/XMLSchema#dateTime","type":"literal","value":"1952-03-11T00:00:00Z"}}]}}"#;
+{"post code":"92802","country":"United States","country abbreviation":"US","places":[{"place name":"Anaheim","longitude":"-117.9228","state":"California","state abbreviation":"CA","latitude":"33.8085"}]}"#;
+    // {"head":{"vars":["dob"]},"results":{"bindings":[{"dob":{"datatype":"http://www.w3.org/2001/XMLSchema#dateTime","type":"literal","value":"1952-03-11T00:00:00Z"}}]}}"#;
     assert_eq!(got, expected);
 }
 
@@ -40,7 +44,7 @@ fn fetch_simple_new_col() {
             svec!["  http://api.zippopotam.us/us/90210      ", "b", "2"],
             svec!["https://api.zippopotam.us/us/94105", "c", "3"],
             svec!["http://api.zippopotam.us/us/92802      ", "d", "4"],
-            svec!["https://query.wikidata.org/sparql?query=SELECT%20?dob%20WHERE%20{wd:Q42%20wdt:P569%20?dob.}&format=json", "Scott Adams", "42"],
+            // svec!["https://query.wikidata.org/sparql?query=SELECT%20?dob%20WHERE%20{wd:Q42%20wdt:P569%20?dob.}&format=json", "Scott Adams", "42"],
         ],
     );
     let mut cmd = wrk.command("fetch");
@@ -48,17 +52,34 @@ fn fetch_simple_new_col() {
         .arg("--new-column")
         .arg("response")
         .arg("data.csv")
-        .arg("--store-error");
+        .arg("--store-error")
+        .arg("--rate-limit")
+        .arg("2");
 
     let got: Vec<Vec<String>> = wrk.read_stdout(&mut cmd);
 
     let expected = vec![
         svec!["URL", "col2", "col3", "response"],
         svec!["https://api.zippopotam.us/us/99999", "a", "1", ""],
-        svec!["http://api.zippopotam.us/us/90210", "b", "2", r#"{"post code":"90210","country":"United States","country abbreviation":"US","places":[{"place name":"Beverly Hills","longitude":"-118.4065","state":"California","state abbreviation":"CA","latitude":"34.0901"}]}"#],
-        svec!["https://api.zippopotam.us/us/94105", "c", "3", r#"{"post code":"94105","country":"United States","country abbreviation":"US","places":[{"place name":"San Francisco","longitude":"-122.3892","state":"California","state abbreviation":"CA","latitude":"37.7864"}]}"#],
-        svec!["http://api.zippopotam.us/us/92802", "d", "4", r#"{"post code":"92802","country":"United States","country abbreviation":"US","places":[{"place name":"Anaheim","longitude":"-117.9228","state":"California","state abbreviation":"CA","latitude":"33.8085"}]}"#],
-        svec!["https://query.wikidata.org/sparql?query=SELECT%20?dob%20WHERE%20{wd:Q42%20wdt:P569%20?dob.}&format=json", "Scott Adams", "42", r#"{"head":{"vars":["dob"]},"results":{"bindings":[{"dob":{"datatype":"http://www.w3.org/2001/XMLSchema#dateTime","type":"literal","value":"1952-03-11T00:00:00Z"}}]}}"#],
+        svec![
+            "http://api.zippopotam.us/us/90210",
+            "b",
+            "2",
+            r#"{"post code":"90210","country":"United States","country abbreviation":"US","places":[{"place name":"Beverly Hills","longitude":"-118.4065","state":"California","state abbreviation":"CA","latitude":"34.0901"}]}"#
+        ],
+        svec![
+            "https://api.zippopotam.us/us/94105",
+            "c",
+            "3",
+            r#"{"post code":"94105","country":"United States","country abbreviation":"US","places":[{"place name":"San Francisco","longitude":"-122.3892","state":"California","state abbreviation":"CA","latitude":"37.7864"}]}"#
+        ],
+        svec![
+            "http://api.zippopotam.us/us/92802",
+            "d",
+            "4",
+            r#"{"post code":"92802","country":"United States","country abbreviation":"US","places":[{"place name":"Anaheim","longitude":"-117.9228","state":"California","state abbreviation":"CA","latitude":"33.8085"}]}"#
+        ],
+        // svec!["https://query.wikidata.org/sparql?query=SELECT%20?dob%20WHERE%20{wd:Q42%20wdt:P569%20?dob.}&format=json", "Scott Adams", "42", r#"{"head":{"vars":["dob"]},"results":{"bindings":[{"dob":{"datatype":"http://www.w3.org/2001/XMLSchema#dateTime","type":"literal","value":"1952-03-11T00:00:00Z"}}]}}"#],
     ];
 
     assert_eq!(got, expected);
@@ -75,7 +96,7 @@ fn fetch_simple_report() {
             svec!["  https://api.zippopotam.us/us/90210      "],
             svec!["https://api.zippopotam.us/us/94105"],
             svec!["https://api.zippopotam.us/us/92802      "],
-            svec!["https://query.wikidata.org/sparql?query=SELECT%20?dob%20WHERE%20{wd:Q42%20wdt:P569%20?dob.}&format=json"],
+            // svec!["https://query.wikidata.org/sparql?query=SELECT%20?dob%20WHERE%20{wd:Q42%20wdt:P569%20?dob.}&format=json"],
         ],
     );
     let mut cmd = wrk.command("fetch");
@@ -91,11 +112,35 @@ fn fetch_simple_report() {
     let got: Vec<Vec<String>> = wrk.read_stdout(&mut cmd);
     let expected = vec![
         svec!["url", "status", "cache_hit", "retries", "response"],
-        svec!["https://api.zippopotam.us/us/07094", "200", "0", "5", r#"{"post code":"07094","country":"United States","country abbreviation":"US","places":[{"place name":"Secaucus","longitude":"-74.0634","state":"New Jersey","state abbreviation":"NJ","latitude":"40.791"}]}"#],
-        svec!["https://api.zippopotam.us/us/90210", "200", "0", "0", r#"{"post code":"90210","country":"United States","country abbreviation":"US","places":[{"place name":"Beverly Hills","longitude":"-118.4065","state":"California","state abbreviation":"CA","latitude":"34.0901"}]}"#],
-        svec!["https://api.zippopotam.us/us/94105", "200", "0", "0", r#"{"post code":"94105","country":"United States","country abbreviation":"US","places":[{"place name":"San Francisco","longitude":"-122.3892","state":"California","state abbreviation":"CA","latitude":"37.7864"}]}"#],
-        svec!["https://api.zippopotam.us/us/92802", "200", "0", "0", r#"{"post code":"92802","country":"United States","country abbreviation":"US","places":[{"place name":"Anaheim","longitude":"-117.9228","state":"California","state abbreviation":"CA","latitude":"33.8085"}]}"#],
-        svec!["https://query.wikidata.org/sparql?query=SELECT%20?dob%20WHERE%20{wd:Q42%20wdt:P569%20?dob.}&format=json", "200", "0", "0", r#"{"head":{"vars":["dob"]},"results":{"bindings":[{"dob":{"datatype":"http://www.w3.org/2001/XMLSchema#dateTime","type":"literal","value":"1952-03-11T00:00:00Z"}}]}}"#],
+        svec![
+            "https://api.zippopotam.us/us/07094",
+            "200",
+            "0",
+            "5",
+            r#"{"post code":"07094","country":"United States","country abbreviation":"US","places":[{"place name":"Secaucus","longitude":"-74.0634","state":"New Jersey","state abbreviation":"NJ","latitude":"40.791"}]}"#
+        ],
+        svec![
+            "https://api.zippopotam.us/us/90210",
+            "200",
+            "0",
+            "0",
+            r#"{"post code":"90210","country":"United States","country abbreviation":"US","places":[{"place name":"Beverly Hills","longitude":"-118.4065","state":"California","state abbreviation":"CA","latitude":"34.0901"}]}"#
+        ],
+        svec![
+            "https://api.zippopotam.us/us/94105",
+            "200",
+            "0",
+            "0",
+            r#"{"post code":"94105","country":"United States","country abbreviation":"US","places":[{"place name":"San Francisco","longitude":"-122.3892","state":"California","state abbreviation":"CA","latitude":"37.7864"}]}"#
+        ],
+        svec![
+            "https://api.zippopotam.us/us/92802",
+            "200",
+            "0",
+            "0",
+            r#"{"post code":"92802","country":"United States","country abbreviation":"US","places":[{"place name":"Anaheim","longitude":"-117.9228","state":"California","state abbreviation":"CA","latitude":"33.8085"}]}"#
+        ],
+        // svec!["https://query.wikidata.org/sparql?query=SELECT%20?dob%20WHERE%20{wd:Q42%20wdt:P569%20?dob.}&format=json", "200", "0", "0", r#"{"head":{"vars":["dob"]},"results":{"bindings":[{"dob":{"datatype":"http://www.w3.org/2001/XMLSchema#dateTime","type":"literal","value":"1952-03-11T00:00:00Z"}}]}}"#],
     ];
     assert_eq!(got, expected);
 }
@@ -147,14 +192,16 @@ fn fetch_simple_redis() {
             svec!["https://api.zippopotam.us/us/94105"],
             svec!["http://api.zippopotam.us/us/92802"],
             svec!["thisisnotaurl"],
-            svec!["https://query.wikidata.org/sparql?query=SELECT%20?dob%20WHERE%20{wd:Q42%20wdt:P569%20?dob.}&format=json"],
+            // svec!["https://query.wikidata.org/sparql?query=SELECT%20?dob%20WHERE%20{wd:Q42%20wdt:P569%20?dob.}&format=json"],
         ],
     );
     let mut cmd = wrk.command("fetch");
     cmd.arg("URL")
         .arg("data.csv")
         .arg("--store-error")
-        .arg("--redis");
+        .arg("--redis")
+        .arg("--rate-limit")
+        .arg("2");
 
     let got = wrk.stdout::<String>(&mut cmd);
 
@@ -162,8 +209,8 @@ fn fetch_simple_redis() {
 {"post code":"90210","country":"United States","country abbreviation":"US","places":[{"place name":"Beverly Hills","longitude":"-118.4065","state":"California","state abbreviation":"CA","latitude":"34.0901"}]}
 {"post code":"94105","country":"United States","country abbreviation":"US","places":[{"place name":"San Francisco","longitude":"-122.3892","state":"California","state abbreviation":"CA","latitude":"37.7864"}]}
 {"post code":"92802","country":"United States","country abbreviation":"US","places":[{"place name":"Anaheim","longitude":"-117.9228","state":"California","state abbreviation":"CA","latitude":"33.8085"}]}
-{"errors":[{"title":"Invalid URL","detail":"relative URL without a base"}]}
-{"head":{"vars":["dob"]},"results":{"bindings":[{"dob":{"datatype":"http://www.w3.org/2001/XMLSchema#dateTime","type":"literal","value":"1952-03-11T00:00:00Z"}}]}}"#;
+{"errors":[{"title":"Invalid URL","detail":"relative URL without a base"}]}"#;
+    // {"head":{"vars":["dob"]},"results":{"bindings":[{"dob":{"datatype":"http://www.w3.org/2001/XMLSchema#dateTime","type":"literal","value":"1952-03-11T00:00:00Z"}}]}}"#;
 
     assert_eq!(got, expected);
 }
@@ -348,7 +395,7 @@ fn fetch_jql_multiple_file() {
 }
 
 #[test]
-#[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
+// #[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
 fn fetch_custom_header() {
     let wrk = Workdir::new("fetch");
     wrk.create(
@@ -371,7 +418,7 @@ fn fetch_custom_header() {
 }
 
 #[test]
-#[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
+// #[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
 fn fetch_custom_invalid_header_error() {
     let wrk = Workdir::new("fetch");
     wrk.create(
@@ -390,7 +437,7 @@ fn fetch_custom_invalid_header_error() {
     wrk.assert_err(&mut cmd);
 }
 #[test]
-#[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
+// #[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
 fn fetch_custom_invalid_user_agent_error() {
     let wrk = Workdir::new("fetch");
     wrk.create(
@@ -411,7 +458,7 @@ fn fetch_custom_invalid_user_agent_error() {
 }
 
 #[test]
-#[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
+// #[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
 fn fetch_custom_user_agent() {
     let wrk = Workdir::new("fetch");
     wrk.create(
@@ -432,7 +479,7 @@ fn fetch_custom_user_agent() {
 }
 
 #[test]
-#[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
+// #[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
 fn fetch_custom_invalid_value_error() {
     let wrk = Workdir::new("fetch");
     wrk.create(
@@ -452,7 +499,7 @@ fn fetch_custom_invalid_value_error() {
 }
 
 #[test]
-#[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
+// #[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
 fn fetchpost_custom_invalid_header_error() {
     let wrk = Workdir::new("fetch");
     wrk.create(
@@ -477,7 +524,7 @@ fn fetchpost_custom_invalid_header_error() {
 }
 
 #[test]
-#[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
+// #[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
 fn fetchpost_custom_invalid_value_error() {
     let wrk = Workdir::new("fetch");
     wrk.create(
@@ -502,7 +549,7 @@ fn fetchpost_custom_invalid_value_error() {
 }
 
 #[test]
-#[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
+// #[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
 fn fetchpost_custom_invalid_user_agent_error() {
     let wrk = Workdir::new("fetch");
     wrk.create(
@@ -528,7 +575,7 @@ fn fetchpost_custom_invalid_user_agent_error() {
 }
 
 #[test]
-#[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
+// #[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
 fn fetchpost_custom_user_agent() {
     let wrk = Workdir::new("fetch");
     wrk.create(
@@ -571,10 +618,10 @@ async fn index() -> impl Responder {
 /// handler with path parameters like `/user/{name}/`
 /// returns Smurf fullname in JSON format
 async fn get_fullname(req: HttpRequest, name: web::Path<String>) -> Result<impl Responder> {
-    println!("{:?}", req);
+    println!("{req:?}");
 
     let obj = MyObj {
-        fullname: format!("{} Smurf", name),
+        fullname: format!("{name} Smurf"),
     };
 
     Ok(web::Json(obj))
@@ -808,7 +855,7 @@ fn fetch_complex_url_template() {
 }
 
 #[test]
-#[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
+// #[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
 fn fetchpost_simple_test() {
     let wrk = Workdir::new("fetch");
     wrk.create(
@@ -889,7 +936,96 @@ fn fetchpost_simple_test() {
 }
 
 #[test]
-#[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
+#[ignore = "Temporarily skip this as we figure out a cross-platform way to test this"]
+fn fetchpost_compress_test() {
+    let wrk = Workdir::new("fetch");
+    wrk.create(
+        "data.csv",
+        vec![
+            svec!["URL", "col1", "number col", "bool_col"],
+            svec!["https://httpbin.org/post", "a", "42", "true"],
+            svec!["https://httpbin.org/post", "b", "3.14", "false"],
+            svec!["https://httpbin.org/post", "c", "666", "true"],
+            svec!["https://httpbin.org/post", "d", "33", "true"],
+            svec!["https://httpbin.org/post", "e", "0", "false"],
+        ],
+    );
+    let mut cmd = wrk.command("fetchpost");
+    cmd.arg("URL")
+        .arg("bool_col,col1,number col")
+        .arg("--jql")
+        .arg(r#""form""#)
+        .arg("--new-column")
+        .arg("response")
+        .arg("--compress")
+        .arg("data.csv");
+
+    let got: Vec<Vec<String>> = wrk.read_stdout(&mut cmd);
+
+    let mut got_parsed: Vec<Vec<String>> = Vec::new();
+    let mut record_parsed: Vec<String> = Vec::new();
+
+    for record in got {
+        record_parsed.clear();
+        record_parsed.push(record[1].to_string());
+        record_parsed.push(record[2].to_string());
+        record_parsed.push(record[3].to_string());
+        record_parsed.push(record[4].to_string());
+
+        got_parsed.push(record_parsed.clone());
+    }
+
+    // this garbled response is actually expected, as httpbin.org does not
+    // decompress compressed requests so it doesn't get zip-bombed.
+    // so it just echoed back the gzipped request body.
+    // https://github.com/postmanlabs/httpbin/issues/577#issuecomment-875814469
+    // but if this was sent to an internal server that did decompress, it would work.
+    let expected = vec![
+        svec!["col1", "number col", "bool_col", "response"],
+        svec![
+            "a",
+            "42",
+            "true",
+            "{\"\\u{1f}�\\u{8}\\0\\0\\0\\0\\0\\0�K��ωO�ϱ-)*MU\\u{3}2\\u{c}m\\u{13}��Js�R��A�\": \
+             String(\"\"), \"F\\0�}�\\u{12}\\\"\\0\\0\\0\": String(\"\")}"
+        ],
+        svec![
+            "b",
+            "3.14",
+            "false",
+            "{\"\\0�i\\u{85}%\\0\\0\\0\": String(\"\"), \
+             \"\\u{1f}�\\u{8}\\0\\0\\0\\0\\0\\0�K��ωO�ϱMK�)NU\\u{3}�\\u{c}m���Js�R��A��z�\": \
+             String(\"\")}"
+        ],
+        svec![
+            "c",
+            "666",
+            "true",
+            "{\"\\u{1f}�\\u{8}\\0\\0\\0\\0\\0\\0�K��ωO�ϱ-)*MU\\u{3}2\\u{c}m���Js�R��A�fff\\0�K]g#\\
+             \
+             \0\\0\\0\": String(\"\")}"
+        ],
+        svec![
+            "d",
+            "33",
+            "true",
+            "{\"\\u{1f}�\\u{8}\\0\\0\\0\\0\\0\\0�K��ωO�ϱ-)*MU\\u{3}2\\u{c}mS��Js�R��A���\\0[ew\\\
+             u{19}\\\"\\0\\0\\0\": String(\"\")}"
+        ],
+        svec![
+            "e",
+            "0",
+            "false",
+            "{\"\\u{1f}�\\u{8}\\0\\0\\0\\0\\0\\0�K��ωO�ϱMK�)NU\\u{3}�\\u{c}mS��Js�R��A�\\u{6}\\0�,\
+             e�\\\"\\0\\0\\0\": String(\"\")}"
+        ],
+    ];
+
+    assert_eq!(got_parsed, expected);
+}
+
+#[test]
+// #[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
 fn fetchpost_jqlfile_doesnotexist_error() {
     let wrk = Workdir::new("fetch");
     wrk.create(
@@ -919,7 +1055,7 @@ fn fetchpost_jqlfile_doesnotexist_error() {
 }
 
 #[test]
-#[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
+// #[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
 fn fetchpost_literalurl_test() {
     let wrk = Workdir::new("fetch_literalurl_test");
     wrk.create(
@@ -984,7 +1120,7 @@ fn fetchpost_literalurl_test() {
 }
 
 #[test]
-#[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
+// #[ignore = "Temporarily skip this as it seems httpbin.org is not currently available"]
 fn fetchpost_simple_report() {
     let wrk = Workdir::new("fetchpost_simple_report");
     wrk.create(

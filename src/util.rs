@@ -9,13 +9,14 @@ use std::{
 use docopt::Docopt;
 #[cfg(any(feature = "full", feature = "lite"))]
 use indicatif::{HumanCount, ProgressBar, ProgressStyle};
+use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 #[cfg(any(feature = "full", feature = "lite"))]
 use serde::de::{Deserialize, Deserializer, Error};
 
 use crate::{
     config::{Config, Delimiter},
-    CliResult,
+    CliError, CliResult,
 };
 
 #[macro_export]
@@ -25,6 +26,8 @@ macro_rules! regex_once_cell {
         RE.get_or_init(|| regex::Regex::new($re).unwrap())
     }};
 }
+
+static ROW_COUNT: once_cell::sync::OnceCell<u64> = OnceCell::new();
 
 #[inline]
 pub fn num_cpus() -> usize {
@@ -85,8 +88,25 @@ pub fn version() -> String {
     enabled_features.push_str("foreach;");
     #[cfg(all(feature = "generate", not(feature = "lite")))]
     enabled_features.push_str("generate;");
+
     #[cfg(all(feature = "luau", not(feature = "lite")))]
-    enabled_features.push_str("luau;");
+    {
+        let luau = mlua::Lua::new();
+        match luau.load("return _VERSION").eval() {
+            Ok(version_info) => {
+                if let mlua::Value::String(string_val) = version_info {
+                    enabled_features.push_str(&format!(
+                        "{};",
+                        string_val.to_str().unwrap_or("Luau - unknown version")
+                    ));
+                } else {
+                    enabled_features.push_str("Luau - ?;");
+                }
+            }
+            Err(e) => enabled_features.push_str(&format!("Luau - cannot retrieve version: {e};")),
+        };
+    }
+
     #[cfg(all(feature = "python", not(feature = "lite")))]
     {
         enabled_features.push_str("python-");
@@ -157,19 +177,31 @@ pub fn show_env_vars() {
 }
 
 #[inline]
-pub fn count_rows(conf: &Config) -> Result<u64, io::Error> {
+pub fn count_rows(conf: &Config) -> Result<u64, CliError> {
     if let Some(idx) = conf.indexed().unwrap_or(None) {
         Ok(idx.count())
     } else {
         // index does not exist or is stale,
         // count records by iterating through records
-        let mut rdr = conf.reader()?;
-        let mut count = 0u64;
-        let mut record = csv::ByteRecord::new();
-        while rdr.read_byte_record(&mut record)? {
-            count += 1;
+        // however, do this only once per invocation and cache the result
+        let rc = ROW_COUNT.get_or_init(|| {
+            if let Ok(mut rdr) = conf.reader() {
+                let mut count = 0u64;
+                let mut record = csv::ByteRecord::new();
+                while rdr.read_byte_record(&mut record).unwrap_or_default() {
+                    count += 1;
+                }
+                count
+            } else {
+                u64::MAX
+            }
+        });
+
+        if *rc < u64::MAX {
+            Ok(*rc)
+        } else {
+            Err(CliError::Other("Unable to get row count".to_string()))
         }
-        Ok(count)
     }
 }
 
@@ -304,10 +336,11 @@ pub const fn num_of_chunks(nitems: usize, chunk_size: usize) -> usize {
     n
 }
 
-#[allow(clippy::cast_sign_loss)]
-pub fn last_modified(md: &fs::Metadata) -> u64 {
+pub fn file_metadata(md: &fs::Metadata) -> (u64, u64) {
     use filetime::FileTime;
-    FileTime::from_last_modification_time(md).unix_seconds() as u64
+    let last_modified = FileTime::from_last_modification_time(md).unix_seconds() as u64;
+    let fsize = md.len();
+    (last_modified, fsize)
 }
 
 #[cfg(any(feature = "full", feature = "lite"))]
@@ -495,6 +528,10 @@ pub fn init_logger() -> String {
 
 #[cfg(feature = "self_update")]
 pub fn qsv_check_for_update(check_only: bool, no_confirm: bool) -> Result<bool, String> {
+    use self_update::cargo_crate_version;
+    const GITHUB_RATELIMIT_MSG: &str =
+        "Github is rate-limiting self-update checks at the moment. Try again in an hour.";
+
     if env::var("QSV_NO_UPDATE").is_ok() {
         return Ok(false);
     }
@@ -511,10 +548,6 @@ pub fn qsv_check_for_update(check_only: bool, no_confirm: bool) -> Result<bool, 
     };
 
     winfo!("Checking GitHub for updates...");
-
-    use self_update::cargo_crate_version;
-    const GITHUB_RATELIMIT_MSG: &str =
-        "Github is rate-limiting self-update checks at the moment. Try again in an hour.";
 
     let curr_version = cargo_crate_version!();
     let releases = if let Ok(releases_list) =
@@ -574,7 +607,7 @@ pub fn qsv_check_for_update(check_only: bool, no_confirm: bool) -> Result<bool, 
             winfo!(
                 r#"This qsv was {QSV_KIND}. self-update does not work for manually {QSV_KIND} binaries.
 If you wish to update to the latest version of qsv, manually install/compile from source
-or download the prebuilt binaries from GitHub."#
+or download the latest prebuilt binaries from GitHub - https://github.com/jqnatividad/qsv/releases/latest"#
             );
         }
     } else {
@@ -732,7 +765,6 @@ pub fn safe_header_names(
             header_name.to_string()
         } else {
             let mut safe_name_always = if header_name.is_empty() {
-                // "_blank".to_string()
                 prefix.to_string()
             } else {
                 safename_regex
@@ -743,19 +775,21 @@ pub fn safe_header_names(
                 safe_name_always.replace_range(0..1, prefix);
             }
 
-            if prefix != "_" && safe_name_always.starts_with('-') {
-                safe_name_always = format!("{prefix}{safe_name_always}");
-            }
-
             let safename_candidate = safe_name_always
                 [..safe_name_always.chars().map(char::len_utf8).take(60).sum()]
                 .to_lowercase();
-            if reserved_names.contains(&safename_candidate) {
+
+            let mut final_candidate = if reserved_names.contains(&safename_candidate) {
                 log::debug!("\"{safename_candidate}\" is a reserved name: {reserved_names:?}");
                 format!("reserved_{safename_candidate}")
             } else {
                 safename_candidate
+            };
+
+            if prefix != "_" && final_candidate.starts_with('_') {
+                final_candidate = format!("{prefix}{final_candidate}");
             }
+            final_candidate
         };
         let mut sequence_suffix = 2_u16;
         let mut candidate_name = safe_name.clone();
@@ -893,4 +927,24 @@ impl ColumnNameParser {
         }
         name
     }
+}
+
+pub fn round_num(dec_f64: f64, places: u32) -> String {
+    use rust_decimal::prelude::*;
+
+    // use from_f64_retain, so we have all the excess bits before rounding with
+    // round_dp_with_strategy as from_f64 will prematurely round when it drops the excess bits
+    let Some(dec_num) = Decimal::from_f64_retain(dec_f64) else {
+        let msg = format!(r#"Failed to convert to decimal "{dec_f64}""#);
+        log::error!("{msg}");
+        return msg;
+    };
+
+    // round using Midpoint Nearest Even Rounding Strategy AKA "Bankers Rounding."
+    // https://docs.rs/rust_decimal/latest/rust_decimal/enum.RoundingStrategy.html#variant.MidpointNearestEven
+    // we also normalize to remove trailing zeroes and to change -0.0 to 0.0.
+    dec_num
+        .round_dp_with_strategy(places, RoundingStrategy::MidpointNearestEven)
+        .normalize()
+        .to_string()
 }

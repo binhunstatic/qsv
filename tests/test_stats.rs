@@ -178,7 +178,7 @@ fn get_field_value(wrk: &Workdir, cmd: &mut process::Command, field: &str) -> St
     if field == "cardinality" {
         cmd.arg("--cardinality");
     }
-    if field == "mode" {
+    if field == "mode" || field == "antimode" {
         cmd.arg("--mode");
     }
     if field == "infer_dates" {
@@ -210,10 +210,7 @@ fn get_field_value(wrk: &Workdir, cmd: &mut process::Command, field: &str) -> St
             }
         }
     }
-    panic!(
-        "BUG: Could not find field '{}' in headers '{:?}' for command '{:?}'.",
-        field, headers, cmd
-    );
+    panic!("BUG: Could not find field '{field}' in headers '{headers:?}' for command '{cmd:?}'.");
 }
 
 stats_tests!(stats_infer_string, "type", &["a"], "String");
@@ -321,13 +318,43 @@ stats_tests!(
     stats_multiple_modes,
     "mode",
     &["a", "a", "b", "b", "c", "d", "e", "e"],
-    "a,b,e"
+    "a,b,e,3,1"
 );
 stats_tests!(
     stats_multiple_modes_num,
     "mode",
     &["5", "5", "33", "33", "42", "17", "99", "99"],
-    "33,5,99"
+    "33,5,99,3,1"
+);
+stats_tests!(
+    stats_multiple_antimodes,
+    "antimode",
+    &["a", "a", "b", "b", "c", "d", "e", "e"],
+    "c,d,2,1"
+);
+stats_tests!(
+    stats_multiple_antimodes_num,
+    "antimode",
+    &["5", "5", "33", "33", "42", "17", "98", "99", "99"],
+    "17,42,98,3,1"
+);
+stats_tests!(
+    stats_range,
+    "range",
+    &["a", "a", "b", "b", "c", "d", "e", "e"],
+    ""
+);
+stats_tests!(
+    stats_range_num,
+    "range",
+    &["5", "5", "33", "33", "42", "17", "98", "99", "99"],
+    "94"
+);
+stats_tests!(
+    stats_sparsity,
+    "sparsity",
+    &["5", "5", "33", "33", "42", "17", "98", "99", "99", ""],
+    "0.1"
 );
 
 stats_tests!(stats_null_mean, "mean", &[""], "");
@@ -336,6 +363,9 @@ stats_tests!(stats_null_variance, "variance", &[""], "");
 stats_tests!(stats_null_median, "median", &[""], "");
 stats_tests!(stats_null_quartiles, "quartiles", &[""], ",,,,,");
 stats_tests!(stats_null_mode, "mode", &[""], "N/A");
+stats_tests!(stats_null_antimode, "antimode", &[""], "*ALL");
+stats_tests!(stats_null_range, "range", &[""], "N/A");
+stats_tests!(stats_null_sparsity, "sparsity", &[""], "1.0");
 
 stats_tests!(stats_includenulls_null_mean, "mean", &[""], "", true, false);
 stats_tests!(
@@ -375,6 +405,30 @@ stats_tests!(
     "mode",
     &[""],
     "N/A",
+    true,
+    false
+);
+stats_tests!(
+    stats_includenulls_null_antimode,
+    "antimode",
+    &[""],
+    "*ALL",
+    true,
+    false
+);
+stats_tests!(
+    stats_includenulls_null_range,
+    "range",
+    &[""],
+    "N/A",
+    true,
+    false
+);
+stats_tests!(
+    stats_includenulls_null_sparsity,
+    "sparsity",
+    &[""],
+    "1.0",
     true,
     false
 );
@@ -455,8 +509,15 @@ stats_tests!(
 );
 
 stats_tests!(stats_cardinality, "cardinality", &["a", "b", "a"], "2");
-stats_tests!(stats_mode, "mode", &["a", "b", "a"], "a");
-stats_tests!(stats_mode_null, "mode", &["", "a", "b", "a"], "a");
+stats_tests!(stats_mode, "mode", &["a", "b", "a"], "a,1,2");
+stats_tests!(stats_mode_null, "mode", &["", "a", "b", "a"], "a,1,2");
+stats_tests!(stats_antimode, "antimode", &["a", "b", "a"], "b,1,1");
+stats_tests!(
+    stats_antimode_null,
+    "antimode",
+    &["", "a", "b", "a"],
+    "NULL,b,2,1"
+);
 stats_tests!(stats_median, "median", &["1", "2", "3"], "2");
 stats_tests!(stats_median_null, "median", &["", "1", "2", "3"], "2");
 stats_tests!(stats_median_even, "median", &["1", "2", "3", "4"], "2.5");
@@ -702,6 +763,25 @@ fn stats_typesonly() {
     let got: String = wrk.stdout(&mut cmd);
 
     let expected = wrk.load_test_resource("boston311-100-typesonly-stats.csv");
+
+    assert_eq!(got, expected.replace("\r\n", "\n").trim_end());
+}
+
+#[test]
+fn stats_typesonly_with_dates() {
+    let wrk = Workdir::new("stats_typesonly_with_dates");
+    let test_file = wrk.load_test_file("boston311-100.csv");
+
+    let mut cmd = wrk.command("stats");
+    cmd.arg("--typesonly")
+        .arg("--infer-dates")
+        .arg("--dates-whitelist")
+        .arg("all")
+        .arg(test_file);
+
+    let got: String = wrk.stdout(&mut cmd);
+
+    let expected = wrk.load_test_resource("boston311-100-typesonly-withdates-stats.csv");
 
     assert_eq!(got, expected.replace("\r\n", "\n").trim_end());
 }

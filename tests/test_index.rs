@@ -1,4 +1,4 @@
-use std::{fs, thread, time};
+use std::fs;
 
 use filetime::{set_file_times, FileTime};
 
@@ -63,8 +63,8 @@ fn index_outdated_stats() {
 }
 
 #[test]
-fn index_outdated_stats_autoindex() {
-    let wrk = Workdir::new("index_outdated_stats");
+fn index_outdated_index_autoindex() {
+    let wrk = Workdir::new("index_outdated_index");
 
     wrk.create_indexed(
         "in.csv",
@@ -79,19 +79,19 @@ fn index_outdated_stats_autoindex() {
     let md = fs::metadata(wrk.path("in.csv.idx")).unwrap();
     set_file_times(
         wrk.path("in.csv"),
-        future_time(FileTime::from_last_modification_time(&md)),
         future_time(FileTime::from_last_access_time(&md)),
+        future_time(FileTime::from_last_modification_time(&md)),
     )
     .unwrap();
 
-    // sleep for one second to ensure the filesystem metadata is up to date
-    thread::sleep(time::Duration::from_millis(1000));
-
-    // stats should NOT fail if the index is stale and
+    // slice should NOT fail if the index is stale and
     // QSV_AUTOINDEX is set
     std::env::set_var("QSV_AUTOINDEX", "1");
-    let mut cmd = wrk.command("stats");
-    cmd.env("QSV_AUTOINDEX", "1").arg("in.csv");
+    let mut cmd = wrk.command("slice");
+    cmd.env("QSV_AUTOINDEX", "1")
+        .arg("-i")
+        .arg("2")
+        .arg("in.csv");
     std::env::remove_var("QSV_AUTOINDEX");
 
     wrk.assert_success(&mut cmd);

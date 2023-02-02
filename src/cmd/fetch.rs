@@ -1,3 +1,4 @@
+#![allow(unused_assignments)]
 static USAGE: &str = r#"
 Fetches data from web services for every row using HTTP Get.
 
@@ -20,9 +21,13 @@ and cache hits NOT refreshing the TTL of cached values.
 Set the environment variables QSV_REDIS_CONNSTR, QSV_REDIS_TTL_SECONDS and 
 QSV_REDIS_TTL_REFRESH to change default Redis settings.
 
-Supports brotli, gzip and deflate compression for improved throughtput & performance.
-Automatically upgrades its connection to HTTP/2 as well if the server supports it.
-(see https://www.cloudflare.com/learning/performance/http2-vs-http1.1/)
+Supports brotli, gzip and deflate automatic decompression for improved throughput and
+performance, preferring brotli over gzip over deflate.
+
+Automatically upgrades its connection to HTTP/2 with adaptive flow control as well
+if the server supports it.
+See https://www.cloudflare.com/learning/performance/http2-vs-http1.1/ and
+https://medium.com/coderscorner/http-2-flow-control-77e54f7fd518 for more info.
 
 EXAMPLES USING THE URL-COLUMN ARGUMENT:
 
@@ -171,7 +176,7 @@ Common options:
     -p, --progressbar          Show progress bars. Not valid for stdin.
 "#;
 
-use std::{fs, thread, time};
+use std::{fs, num::NonZeroU32, thread, time};
 
 use cached::{
     proc_macro::{cached, io_cached},
@@ -182,6 +187,7 @@ use governor::{
     clock::DefaultClock,
     middleware::NoOpMiddleware,
     state::{direct::NotKeyed, InMemoryState},
+    Quota, RateLimiter,
 };
 use indicatif::{HumanCount, MultiProgress, ProgressBar, ProgressDrawTarget};
 use log::{
@@ -192,7 +198,10 @@ use once_cell::sync::{Lazy, OnceCell};
 use rand::Rng;
 use redis;
 use regex::Regex;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use reqwest::{
+    blocking::Client,
+    header::{HeaderMap, HeaderName, HeaderValue},
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use url::Url;
@@ -242,6 +251,18 @@ const FETCH_REPORT_SUFFIX: &str = ".fetch-report.tsv";
 
 // prioritize compression schemes. Brotli first, then gzip, then deflate, and * last
 static DEFAULT_ACCEPT_ENCODING: &str = "br;q=1.0, gzip;q=0.6, deflate;q=0.4, *;q=0.2";
+
+// for governor/ratelimiter
+const MINIMUM_WAIT_MS: u64 = 10;
+const MIN_WAIT: time::Duration = time::Duration::from_millis(MINIMUM_WAIT_MS);
+
+// for --report option
+#[derive(PartialEq)]
+enum ReportKind {
+    Detailed,
+    Short,
+    None,
+}
 
 impl From<reqwest::Error> for CliError {
     fn from(err: reqwest::Error) -> CliError {
@@ -391,7 +412,6 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
         debug!("dynfmt_fields: {dynfmt_fields:?}  url_template: {dynfmt_url_template}");
     }
 
-    use std::num::NonZeroU32;
     let rate_limit = match args.flag_rate_limit {
         0 => NonZeroU32::new(u32::MAX).unwrap(),
         1..=1000 => NonZeroU32::new(args.flag_rate_limit).unwrap(),
@@ -446,8 +466,6 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
     };
     debug!("HTTP Header: {http_headers:?}");
 
-    use reqwest::blocking::Client;
-
     let client_timeout = time::Duration::from_secs(*TIMEOUT_SECS.get().unwrap_or(&30));
     let client = Client::builder()
         .user_agent(user_agent)
@@ -461,8 +479,6 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
         .connection_verbose(log_enabled!(Debug) || log_enabled!(Trace))
         .timeout(client_timeout)
         .build()?;
-
-    use governor::{Quota, RateLimiter};
 
     // set rate limiter with allow_burst set to 1 - see https://github.com/antifuchs/governor/issues/39
     let limiter =
@@ -504,13 +520,6 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
         Some(ref jql_file) => Some(fs::read_to_string(jql_file)?),
         None => args.flag_jql.as_ref().map(std::string::ToString::to_string),
     };
-
-    #[derive(PartialEq)]
-    enum ReportKind {
-        Detailed,
-        Short,
-        None,
-    }
 
     // prepare report
     let report = if args.flag_report.to_lowercase().starts_with('d') {
@@ -563,23 +572,16 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
     // we still optimize since fetch is backed by a memoized cache (in memory or Redis, when --redis
     // is used), so we want to return responses as fast as possible as we bypass the network
     // request with a cache hit
-    #[allow(unused_assignments)]
     let mut record = csv::ByteRecord::new();
-    #[allow(unused_assignments)]
     let mut jsonl_record = csv::ByteRecord::new();
-    #[allow(unused_assignments)]
     let mut report_record = csv::ByteRecord::new();
-    #[allow(unused_assignments)]
     let mut url = String::with_capacity(100);
-    #[allow(unused_assignments)]
     let mut record_vec: Vec<String> = Vec::with_capacity(headers.len());
     let mut redis_cache_hits: u64 = 0;
-    #[allow(unused_assignments)]
     let mut intermediate_redis_value: Return<String> = Return {
         was_cached: false,
         value:      String::new(),
     };
-    #[allow(unused_assignments)]
     let mut intermediate_value: Return<FetchResponse> = Return {
         was_cached: false,
         value:      FetchResponse {
@@ -588,9 +590,7 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
             retries:     0_u8,
         },
     };
-    #[allow(unused_assignments)]
     let mut final_value = String::with_capacity(150);
-    #[allow(unused_assignments)]
     let mut final_response = FetchResponse {
         response:    String::new(),
         status_code: 0_u16,
@@ -630,7 +630,7 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
         } else if let Ok(s) = std::str::from_utf8(&record[column_index]) {
             // we're not using a URL template,
             // just use the field as-is as the URL
-            url = s.to_owned();
+            s.clone_into(&mut url);
         } else {
             url = String::new();
         }
@@ -916,8 +916,6 @@ fn get_response(
     info!("Using URL: {valid_url}");
 
     // wait until RateLimiter gives Okay or we timeout
-    const MINIMUM_WAIT_MS: u64 = 10;
-    const MIN_WAIT: time::Duration = time::Duration::from_millis(MINIMUM_WAIT_MS);
     let mut limiter_total_wait: u64;
     let timeout_secs = unsafe { *TIMEOUT_SECS.get_unchecked() };
     let governor_timeout_ms = timeout_secs * 1_000;

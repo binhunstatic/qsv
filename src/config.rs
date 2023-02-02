@@ -19,11 +19,16 @@ use crate::{
 const DEFAULT_RDR_BUFFER_CAPACITY: usize = 16 * (1 << 10);
 // previous wtr default in xsv is 32k, we're doubling it
 pub const DEFAULT_WTR_BUFFER_CAPACITY: usize = 64 * (1 << 10);
+
 // number of rows for qsv_sniffer to sample
 const DEFAULT_SNIFFER_SAMPLE: usize = 100;
+
 // for files, number of bytes to check for UTF8 encoding
 const DEFAULT_UTF8_CHECK_BUFFER_LEN: usize = 8192;
 const UTF8_ERROR_MSG: &str = "is not UTF-8 encoded. Use the input command to transcode to UTF-8.";
+
+// file size at which we warn user that a large file has not been indexed
+const NO_INDEX_WARNING_FILESIZE: u64 = 100_000_000; // 100MB
 
 #[derive(Clone, Copy, Debug)]
 pub struct Delimiter(pub u8);
@@ -66,7 +71,6 @@ impl<'de> Deserialize<'de> for Delimiter {
     }
 }
 
-#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug)]
 pub struct Config {
     path:              Option<PathBuf>, // None implies <stdin>
@@ -285,7 +289,7 @@ impl Config {
         Ok(self.from_writer(self.io_writer()?))
     }
 
-    pub fn reader(&self) -> io::Result<csv::Reader<Box<dyn io::Read + 'static>>> {
+    pub fn reader(&self) -> io::Result<csv::Reader<Box<dyn io::Read + Send + 'static>>> {
         Ok(self.from_reader(self.io_reader()?))
     }
 
@@ -379,7 +383,8 @@ impl Config {
 
     fn autoindex_file(&self) {
         use io::prelude::*;
-        // autoindex should never panic. It should silently fail as its a "convenience fn"
+
+        // autoindex_file should never panic. It should silently fail as its a "convenience fn"
         // that's why we have a lot of let-else returns, in lieu of unwraps
         let Some(path_buf) = &self.path else { return };
 
@@ -389,7 +394,7 @@ impl Config {
         let mut wtr = io::BufWriter::new(idxfile);
         match csv_index::RandomAccessSimple::create(&mut rdr, &mut wtr) {
             Ok(_) => {
-                wtr.flush().unwrap();
+                let Ok(_) = wtr.flush() else { return };
                 debug!("autoindex of {path_buf:?} successful.");
             }
             Err(e) => debug!("autoindex of {path_buf:?} failed: {e}"),
@@ -411,11 +416,13 @@ impl Config {
                 let idx_file = match fs::File::open(util::idx_path(p)) {
                     Err(e) => {
                         if self.autoindex {
+                            // however, if QSV_AUTOINDEX is set, we create the index automatically
                             self.autoindex_file();
+                            fs::File::open(util::idx_path(p)).unwrap()
                         } else {
                             warn!("No index file found - {p:?}: {e}");
+                            return Ok(None);
                         }
-                        return Ok(None);
                     }
                     Ok(f) => f,
                 };
@@ -424,13 +431,14 @@ impl Config {
             (Some(p), Some(ip)) => (fs::File::open(p)?, fs::File::open(ip)?),
         };
         // If the CSV data was last modified after the index file was last
-        // modified, then return an error and demand the user regenerate the
-        // index.
-        let data_modified = util::last_modified(&csv_file.metadata()?);
-        let idx_modified = util::last_modified(&idx_file.metadata()?);
+        // modified, then return an error and demand the user regenerate the index.
+        // Unless QSV_AUTOINDEX is set, in which case, we'll recreate the
+        // stale index automatically
+        let (data_modified, data_fsize) = util::file_metadata(&csv_file.metadata()?);
+        let (idx_modified, _) = util::file_metadata(&idx_file.metadata()?);
         if data_modified > idx_modified {
             if self.autoindex {
-                debug!("index stale... autoindexing...");
+                info!("index stale... autoindexing...");
                 self.autoindex_file();
             } else {
                 return Err(io::Error::new(
@@ -438,6 +446,18 @@ impl Config {
                     "The CSV file was modified after the index file. Please re-create the index.",
                 ));
             }
+        }
+        // If the CSV file is larger than NO_INDEX_WARNING_FILESIZE,
+        // log a warning that the user should consider creating an index file for faster access.
+        if data_fsize > NO_INDEX_WARNING_FILESIZE {
+            use thousands::Separable;
+
+            warn!(
+                "The {} MB CSV file is larger than the {} MB NO_INDEX_WARNING_FILESIZE threshold. \
+                 Consider creating an index file for faster access.",
+                (data_fsize * 100).separate_with_commas(),
+                (NO_INDEX_WARNING_FILESIZE * 100).separate_with_commas()
+            );
         }
         let csv_rdr = self.from_reader(csv_file);
         Ok(Some((csv_rdr, idx_file)))
@@ -450,7 +470,7 @@ impl Config {
         }
     }
 
-    pub fn io_reader(&self) -> io::Result<Box<dyn io::Read + 'static>> {
+    pub fn io_reader(&self) -> io::Result<Box<dyn io::Read + Send + 'static>> {
         Ok(match self.path {
             None => {
                 if self.checkutf8 {

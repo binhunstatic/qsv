@@ -42,6 +42,8 @@ mod test_combos;
 mod test_comments;
 mod test_count;
 mod test_dedup;
+#[cfg(feature = "full")]
+mod test_diff;
 #[cfg(any(feature = "full", feature = "lite"))]
 mod test_enumerate;
 mod test_excel;
@@ -158,7 +160,7 @@ impl ops::DerefMut for CsvRecord {
 impl fmt::Debug for CsvRecord {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let bytes: Vec<_> = self.iter().map(std::string::String::as_bytes).collect();
-        write!(f, "{:?}", bytes)
+        write!(f, "{bytes:?}")
     }
 }
 

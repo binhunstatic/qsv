@@ -1,6 +1,6 @@
 [package]
 name = "qsv"
-version = "0.80.2" #:version
+version = "0.87.1" #:version
 authors = ["Joel Natividad <joel@datHere.com>"]
 description = "A high performance CSV data-wrangling toolkit."
 documentation = "https://github.com/jqnatividad/qsv#qsv-ultra-fast-csv-data-wrangling-toolkit"
@@ -12,7 +12,7 @@ categories = ["command-line-utilities", "parser-implementations"]
 license = "MIT OR Unlicense"
 autotests = false
 edition = "2021"
-rust-version = "1.66"
+rust-version = "1.67.0"
 autobins = false
 include = [
     "src/**/*",
@@ -61,13 +61,10 @@ strip         = true
 inherits = "release"
 panic    = "abort"
 
-[profile.test]
-opt-level = 3
-
 [dependencies]
 ahash = "0.8"
 byteorder = "1.4"
-cached = { version = "0.41", default-features = false, features = [
+cached = { version = "0.42", default-features = false, features = [
     "proc_macro",
     "redis_ahash",
 ], optional = true }
@@ -75,12 +72,13 @@ calamine = { version = "0.19", features = ["dates"] }
 censor = { version = "0.3", optional = true }
 chrono = "0.4"
 console = { version = "0.15", optional = true }
-cpc = { version = "1.8", optional = true }
+cpc = { version = "1.9", optional = true }
 crossbeam-channel = "0.5"
 csv = "1.1"
 csv-core = "0.1"
+csv-diff = "0.1.0-beta.1"
 csv-index = "0.1"
-csvs_convert = { version = "0.7.8", optional = true }
+csvs_convert = { version = "0.7.12", optional = true }
 data-encoding = { version = "2.3", optional = true }
 docopt = "1"
 dynfmt = { version = "0.1", default-features = false, features = [
@@ -90,6 +88,7 @@ eudex = { version = "0.1", optional = true }
 ext-sort = { version = "0.1", features = [
     "memory-limit",
 ], default-features = false }
+flate2 = { version = "1", optional = true }
 filetime = "0.2"
 flexi_logger = { version = "0.24", features = [
     "compress",
@@ -110,13 +109,13 @@ log = "0.4"
 mimalloc = { version = "0.1", default-features = false, optional = true }
 mlua = { version = "0.8", features = ["luau"], optional = true }
 num_cpus = "1"
-once_cell = { version = "1.16", features = ["parking_lot"] }
+once_cell = { version = "1.17", features = ["parking_lot"] }
 parking_lot = { version = "0.12", features = ["hardware-lock-elision"] }
-pyo3 = { version = "0.17", features = ["auto-initialize"], optional = true }
-qsv-dateparser = "0.4"
-qsv-stats = "0.5"
+pyo3 = { version = "0.18", features = ["auto-initialize"], optional = true }
+qsv-dateparser = "0.6"
+qsv-stats = "0.7"
 qsv_currency = { version = "0.6", optional = true }
-qsv-sniffer = { version = "0.5", features = ["runtime-dispatch-simd"] }
+qsv-sniffer = { version = "0.6", features = ["runtime-dispatch-simd"] }
 rand = "0.8"
 rayon = "1.6"
 redis = { version = "0.22", features = [
@@ -134,16 +133,17 @@ reqwest = { version = "0.11", features = [
 reverse_geocoder = { version = "3", optional = true }
 rust_decimal = "1.27"
 ryu = "1"
-self_update = { version = "0.32", features = [
+self_update = { version = "0.34", features = [
     "archive-zip",
     "compression-zip-deflate",
     "rustls",
 ], default-features = false, optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+serde_urlencoded = { version = "0.7", optional = true }
 strsim = { version = "0.10", optional = true }
-strum = { version = "0.24", optional = true }
-strum_macros = { version = "0.24", optional = true }
+strum = "0.24"
+strum_macros = "0.24"
 sysinfo = "0.27"
 tabwriter = "1.2"
 tempfile = "3"
@@ -158,7 +158,7 @@ vader_sentiment = { version = "0.1", optional = true }
 whatlang = { version = "0.16", optional = true }
 
 [dev-dependencies]
-actix-governor = "0.3"
+actix-governor = "0.4"
 actix-web = { version = "4.2", default-features = false, features = [
     "compress-brotli",
     "compress-gzip",
@@ -166,7 +166,7 @@ actix-web = { version = "4.2", default-features = false, features = [
 assert-json-diff = "2.0"
 newline-converter = "0.2"
 quickcheck = { version = "1", default-features = false }
-serial_test = "0.10"
+serial_test = "1.0"
 
 [patch.crates-io]
 csv       = { git = "https://github.com/jqnatividad/rust-csv", branch = "perf-tweaks" }
@@ -200,8 +200,6 @@ apply = [
     "qsv_currency",
     "reverse_geocoder",
     "strsim",
-    "strum",
-    "strum_macros",
     "titlecase",
     "vader_sentiment",
     "whatlang",
@@ -210,11 +208,13 @@ fetch = [
     "cached",
     "console",
     "dynfmt",
+    "flate2",
     "governor",
     "hashbrown",
     "jql",
     "jsonxf",
     "redis",
+    "serde_urlencoded",
     "url",
 ]
 foreach = []
@@ -223,7 +223,7 @@ luau = ["mlua"]
 python = ["pyo3"]
 to = ["csvs_convert"]
 lite = []
-datapusher_plus = ["dynfmt", "self_update", "strum", "strum_macros"]
+datapusher_plus = ["dynfmt", "self_update"]
 full = []
 nightly = [
     "regex/unstable",

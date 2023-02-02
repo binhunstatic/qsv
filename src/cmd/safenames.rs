@@ -7,6 +7,12 @@ characters with _. If the first character is a digit, replace the digit with the
 If a header with the same name already exists, append a sequence suffix (e.g. c1, c1_2, c1_3).
 Names are limited to 60 characters in length. Empty names are replaced with "unsafe_".
 
+In addition, specifically because of CKAN Datastore requirements:
+- Headers with leading underscores are replaced with "unsafe_" prefix.
+- Headers that are named "_id" are renamed to "reserved__id".
+
+These CKAN Datastore options can be configured via the --prefix & --reserved options, respectively.
+
 In Always (a) and Conditional (c) mode, returns number of modified headers to stderr,
 and sends CSV with safe headers output to stdout.
 
@@ -158,8 +164,15 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
 
     let mut headers = csv::StringRecord::from_byte_record_lossy(old_headers.clone());
     if let SafeNameMode::Conditional | SafeNameMode::Always = safenames_mode {
+        // trim enclosing quotes and spaces from headers as it messes up safenames
+        // csv library will automatically add quotes when necessary when we write it
+        let mut noquote_headers = csv::StringRecord::new();
+        for header in &headers {
+            noquote_headers.push_field(header.trim_matches(|c| c == '"' || c == ' '));
+        }
+
         let (safe_headers, changed_count) = util::safe_header_names(
-            &headers,
+            &noquote_headers,
             true,
             safenames_mode == SafeNameMode::Conditional,
             &reserved_names_vec,
@@ -224,6 +237,7 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
                     unsafe_headers:  unsafenames_vec,
                     safe_headers:    safenames_vec,
                 };
+                // its OK to have unwrap here because safenames_struct is always valid
                 if safenames_mode == SafeNameMode::VerifyVerbosePrettyJSON {
                     println!(
                         "{}",

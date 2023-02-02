@@ -1,3 +1,4 @@
+#![allow(unused_assignments)]
 static USAGE: &str = r#"
 Fetchpost fetches data from web services for every row using HTTP Post.
 As opposed to fetch, which uses HTTP Get.
@@ -24,9 +25,18 @@ cache at database 2, as opposed to database 1 with fetch.
 Set the environment variables QSV_FP_REDIS_CONNSTR, QSV_FP_REDIS_TTL_SECONDS and 
 QSV_FP_REDIS_TTL_REFRESH respectively to change default Redis settings.
 
-Supports brotli, gzip and deflate compression for improved throughtput & performance.
-Automatically upgrades its connection to HTTP/2 as well if the server supports it.
-(see https://www.cloudflare.com/learning/performance/http2-vs-http1.1/)
+Supports brotli, gzip and deflate automatic decompression for improved throughput and
+performance, preferring brotli over gzip over deflate.
+
+Gzip compression of requests bodies is supported with the --compress flag. Note that
+public APIs typically do not support gzip compression of request bodies because of the
+"zip bomb" vulnerability. This option should only be used with private APIs where this
+is not a concern.
+
+Automatically upgrades its connection to HTTP/2 with adaptive flow control as well
+if the server supports it.
+See https://www.cloudflare.com/learning/performance/http2-vs-http1.1/ and
+https://medium.com/coderscorner/http-2-flow-control-77e54f7fd518 for more info.
 
 EXAMPLES:
 
@@ -112,6 +122,11 @@ Fetchpost options:
     -H, --http-header <k:v>    Append custom header(s) to the HTTP header. Pass multiple key-value pairs
                                by adding this option multiple times, once for each pair. The key and value 
                                should be separated by a colon.
+    --compress                 Compress the HTTP request body using gzip. Note that most servers do not support
+                               compressed request bodies unless they are specifically configured to do so. This
+                               should only be enabled for trusted scenarios where "zip bombs" are not a concern.
+                               see https://github.com/postmanlabs/httpbin/issues/577#issuecomment-875814469
+                               for more info.
     --max-retries <count>      Maximum number of retries per record before an error is raised.
                                [default: 5]
     --max-errors <count>       Maximum number of errors before aborting.
@@ -152,16 +167,18 @@ Common options:
     -p, --progressbar          Show progress bars. Not valid for stdin.
 "#;
 
-use std::{fs, thread, time};
+use std::{fs, io::Write, num::NonZeroU32, thread, time};
 
 use cached::{
     proc_macro::{cached, io_cached},
     Cached, IOCached, RedisCache, Return,
 };
+use flate2::{write::GzEncoder, Compression};
 use governor::{
     clock::DefaultClock,
     middleware::NoOpMiddleware,
     state::{direct::NotKeyed, InMemoryState},
+    Quota, RateLimiter,
 };
 use indicatif::{HumanCount, MultiProgress, ProgressBar, ProgressDrawTarget};
 use log::{
@@ -172,9 +189,13 @@ use once_cell::sync::{Lazy, OnceCell};
 use rand::Rng;
 use redis;
 use regex::Regex;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use reqwest::{
+    blocking::Client,
+    header::{HeaderMap, HeaderName, HeaderValue},
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use serde_urlencoded;
 use url::Url;
 
 use crate::{
@@ -193,6 +214,7 @@ struct Args {
     flag_rate_limit:  u32,
     flag_timeout:     u64,
     flag_http_header: Vec<String>,
+    flag_compress:    bool,
     flag_max_retries: u8,
     flag_max_errors:  u64,
     flag_store_error: bool,
@@ -220,8 +242,20 @@ static TIMEOUT_FP_SECS: OnceCell<u64> = OnceCell::new();
 const FETCHPOST_REPORT_PREFIX: &str = "qsv_fetchp_";
 const FETCHPOST_REPORT_SUFFIX: &str = ".fetchpost-report.tsv";
 
-// prioritize compression schemes. Brotli first, then gzip, then deflate, and * last
+// prioritize decompression schemes. Brotli first, then gzip, then deflate, and * last
 static DEFAULT_ACCEPT_ENCODING: &str = "br;q=1.0, gzip;q=0.6, deflate;q=0.4, *;q=0.2";
+
+// for governor/ratelimiter
+const MINIMUM_WAIT_MS: u64 = 10;
+const MIN_WAIT: time::Duration = time::Duration::from_millis(MINIMUM_WAIT_MS);
+
+// for --report option
+#[derive(PartialEq)]
+enum ReportKind {
+    Detailed,
+    Short,
+    None,
+}
 
 struct RedisConfig {
     conn_str:      String,
@@ -357,7 +391,6 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
         }
     }
 
-    use std::num::NonZeroU32;
     let rate_limit = match args.flag_rate_limit {
         0 => NonZeroU32::new(u32::MAX).unwrap(),
         1..=1000 => NonZeroU32::new(args.flag_rate_limit).unwrap(),
@@ -408,11 +441,19 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
             reqwest::header::ACCEPT_ENCODING,
             HeaderValue::from_str(DEFAULT_ACCEPT_ENCODING).unwrap(),
         );
+        map.append(
+            reqwest::header::CONTENT_TYPE,
+            HeaderValue::from_str("application/x-www-form-urlencoded").unwrap(),
+        );
+        if args.flag_compress {
+            map.append(
+                reqwest::header::CONTENT_ENCODING,
+                HeaderValue::from_str("gzip").unwrap(),
+            );
+        }
         map
     };
     debug!("HTTP Header: {http_headers:?}");
-
-    use reqwest::blocking::Client;
 
     let client_timeout = time::Duration::from_secs(*TIMEOUT_FP_SECS.get().unwrap_or(&30));
     let client = Client::builder()
@@ -427,8 +468,6 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
         .connection_verbose(log_enabled!(Debug) || log_enabled!(Trace))
         .timeout(client_timeout)
         .build()?;
-
-    use governor::{Quota, RateLimiter};
 
     // set rate limiter with allow_burst set to 1 - see https://github.com/antifuchs/governor/issues/39
     let limiter =
@@ -470,13 +509,6 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
         Some(ref jql_file) => Some(fs::read_to_string(jql_file)?),
         None => args.flag_jql.as_ref().map(std::string::ToString::to_string),
     };
-
-    #[derive(PartialEq)]
-    enum ReportKind {
-        Detailed,
-        Short,
-        None,
-    }
 
     // prepare report
     let report = if args.flag_report.to_lowercase().starts_with('d') {
@@ -531,21 +563,15 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
     // we still optimize since fetch is backed by a memoized cache (in memory or Redis, when --redis
     // is used), so we want to return responses as fast as possible as we bypass the network
     // request with a cache hit
-    #[allow(unused_assignments)]
     let mut record = csv::ByteRecord::new();
-    #[allow(unused_assignments)]
     let mut jsonl_record = csv::ByteRecord::new();
-    #[allow(unused_assignments)]
     let mut report_record = csv::ByteRecord::new();
-    #[allow(unused_assignments)]
     let mut url = String::with_capacity(100);
     let mut redis_cache_hits: u64 = 0;
-    #[allow(unused_assignments)]
     let mut intermediate_redis_value: Return<String> = Return {
         was_cached: false,
         value:      String::new(),
     };
-    #[allow(unused_assignments)]
     let mut intermediate_value: Return<FetchResponse> = Return {
         was_cached: false,
         value:      FetchResponse {
@@ -554,9 +580,7 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
             retries:     0_u8,
         },
     };
-    #[allow(unused_assignments)]
     let mut final_value = String::with_capacity(150);
-    #[allow(unused_assignments)]
     let mut final_response = FetchResponse {
         response:    String::new(),
         status_code: 0_u16,
@@ -593,12 +617,14 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
                 serde_json::Value::String(value_string),
             );
         }
-        debug!("{form_body_jsonmap:?}");
+        if log::log_enabled!(Debug) {
+            debug!("{form_body_jsonmap:?}");
+        }
 
         if literal_url_used {
             url = literal_url.clone();
         } else if let Ok(s) = std::str::from_utf8(&record[column_index]) {
-            url = s.to_owned();
+            s.clone_into(&mut url);
         } else {
             url = String::new();
         }
@@ -615,6 +641,7 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
                 &jql_selector,
                 args.flag_store_error,
                 args.flag_pretty,
+                args.flag_compress,
                 include_existing_columns,
                 args.flag_max_retries,
             )?;
@@ -633,12 +660,13 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
             };
             if !args.flag_cache_error && final_response.status_code != 200 {
                 let key = format!(
-                    "{}{:?}{:?}{}{}{}",
+                    "{}{:?}{:?}{}{}{}{}",
                     url,
                     form_body_jsonmap,
                     args.flag_jql,
                     args.flag_store_error,
                     args.flag_pretty,
+                    args.flag_compress,
                     include_existing_columns
                 );
 
@@ -656,6 +684,7 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
                 &jql_selector,
                 args.flag_store_error,
                 args.flag_pretty,
+                args.flag_compress,
                 include_existing_columns,
                 args.flag_max_retries,
             );
@@ -786,6 +815,7 @@ fn get_cached_response(
     flag_jql: &Option<String>,
     flag_store_error: bool,
     flag_pretty: bool,
+    flag_compress: bool,
     include_existing_columns: bool,
     flag_max_retries: u8,
 ) -> cached::Return<FetchResponse> {
@@ -797,6 +827,7 @@ fn get_cached_response(
         flag_jql,
         flag_store_error,
         flag_pretty,
+        flag_compress,
         include_existing_columns,
         flag_max_retries,
     ))
@@ -808,7 +839,7 @@ fn get_cached_response(
 #[io_cached(
     type = "cached::RedisCache<String, String>",
     key = "String",
-    convert = r#"{ format!("{}{:?}{:?}{}{}{}", url, form_body_jsonmap, flag_jql, flag_store_error, flag_pretty, include_existing_columns) }"#,
+    convert = r#"{ format!("{}{:?}{:?}{}{}{}{}", url, form_body_jsonmap, flag_jql, flag_store_error, flag_pretty, flag_compress, include_existing_columns) }"#,
     create = r##" {
         RedisCache::new("fp", REDISCONFIG.ttl_secs)
             .set_namespace("q")
@@ -829,6 +860,7 @@ fn get_redis_response(
     flag_jql: &Option<String>,
     flag_store_error: bool,
     flag_pretty: bool,
+    flag_compress: bool,
     include_existing_columns: bool,
     flag_max_retries: u8,
 ) -> Result<cached::Return<String>, CliError> {
@@ -841,6 +873,7 @@ fn get_redis_response(
             flag_jql,
             flag_store_error,
             flag_pretty,
+            flag_compress,
             include_existing_columns,
             flag_max_retries,
         ))
@@ -848,6 +881,7 @@ fn get_redis_response(
     }))
 }
 
+#[allow(clippy::fn_params_excessive_bools)]
 #[inline]
 fn get_response(
     url: &str,
@@ -857,6 +891,7 @@ fn get_response(
     flag_jql: &Option<String>,
     flag_store_error: bool,
     flag_pretty: bool,
+    flag_compress: bool,
     include_existing_columns: bool,
     flag_max_retries: u8,
 ) -> FetchResponse {
@@ -893,8 +928,6 @@ fn get_response(
     info!("Using URL: {valid_url}");
 
     // wait until RateLimiter gives Okay or we timeout
-    const MINIMUM_WAIT_MS: u64 = 10;
-    const MIN_WAIT: time::Duration = time::Duration::from_millis(MINIMUM_WAIT_MS);
     let mut limiter_total_wait: u64;
     let timeout_secs = unsafe { *TIMEOUT_FP_SECS.get_unchecked() };
     let governor_timeout_ms = timeout_secs * 1_000;
@@ -925,7 +958,21 @@ fn get_response(
         }
 
         // send the actual request
-        if let Ok(resp) = client.post(&valid_url).form(form_body_jsonmap).send() {
+        let form_body_raw = serde_urlencoded::to_string(form_body_jsonmap)
+            .unwrap()
+            .as_bytes()
+            .to_owned();
+        let resp_result = if flag_compress {
+            // gzip the request body
+            let mut gz_enc = GzEncoder::new(Vec::new(), Compression::default());
+            gz_enc.write_all(&form_body_raw).unwrap();
+            let gzipped_request_body = gz_enc.finish().unwrap();
+            client.post(&valid_url).body(gzipped_request_body).send()
+        } else {
+            client.post(&valid_url).body(form_body_raw).send()
+        };
+
+        if let Ok(resp) = resp_result {
             // debug!("{resp:?}");
             api_respheader.clone_from(resp.headers());
             api_status = resp.status();

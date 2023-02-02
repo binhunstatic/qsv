@@ -146,7 +146,7 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
                     for field in fields.iter() {
                         field_vec.push(field.to_string());
                     }
-                    let field_list = field_vec.join("\", \"");
+                    let field_list = field_vec.join(r#"", ""#);
                     header_msg = format!(
                         "{} columns (\"{field_list}\") and ",
                         header_len.separate_with_commas()
@@ -160,14 +160,20 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
                                 "detail" : format!("{e}")
                             }]
                         });
-                        return fail!(header_error.to_string());
+                        let json_error = if args.flag_pretty_json {
+                            serde_json::to_string_pretty(&header_error).unwrap()
+                        } else {
+                            header_error.to_string()
+                        };
+
+                        return fail!(json_error);
                     }
                     return fail_clierror!("Cannot read header ({e}).");
                 }
             }
         }
 
-        let mut record_count: u64 = 0;
+        let mut record_idx: u64 = 0;
         for result in rdr.records() {
             #[cfg(any(feature = "full", feature = "lite"))]
             if show_progress {
@@ -179,16 +185,29 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
                     let validation_error = json!({
                         "errors": [{
                             "title" : "Validation error",
-                            "detail" : format!("Last valid row: {record_count} - {e}")
+                            "detail" : format!("{e}"),
+                            "meta": {
+                                "last_valid_record": format!("{record_idx}"),
+                            }
                         }]
                     });
-                    return fail!(validation_error.to_string());
+
+                    let json_error = if args.flag_pretty_json {
+                        serde_json::to_string_pretty(&validation_error).unwrap()
+                    } else {
+                        validation_error.to_string()
+                    };
+
+                    return fail!(json_error);
                 }
                 return fail_clierror!(
-                    r#"Validation error: {e}.\n Last valid row: {record_count}\nTry "qsv fixlengths" or "qsv fmt" to fix it."#
+                    r#"Validation error: {e}.
+Last valid record: {record_idx}
+Use `qsv fixlengths` to fix record length issues.
+Use `qsv input` to fix formatting and to transcode to utf8 if required."#
                 );
             }
-            record_count += 1;
+            record_idx += 1;
         }
 
         #[cfg(any(feature = "full", feature = "lite"))]
@@ -205,7 +224,7 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
                 delimiter_char: rconfig.get_delimiter() as char,
                 header_row:     !rconfig.no_headers,
                 quote_char:     rconfig.quote as char,
-                num_records:    record_count,
+                num_records:    record_idx,
                 num_fields:     header_len,
                 fields:         field_vec,
             };
@@ -218,7 +237,7 @@ pub fn run(argv: &[&str]) -> CliResult<()> {
         } else {
             format!(
                 "Valid: {header_msg}{} records detected.",
-                record_count.separate_with_commas()
+                record_idx.separate_with_commas()
             )
         };
         woutinfo!("{msg}");

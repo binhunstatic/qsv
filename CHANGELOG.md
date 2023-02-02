@@ -6,6 +6,197 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.87.0] - 2023-01-29
+
+### Added
+* `apply`: add decimal separator --replacement option to thousands operation. This fully rounds out `thousands` formatting, as it will allow formatting numbers to support "euro-style" formats (e.g. 1.234.567,89 instead of 1,234,567.89) https://github.com/jqnatividad/qsv/pull/749
+* `apply`: add round operation; also refactored thousands operation to use more appropriate `--formatstr` option instead of `--comparand` option to specify "format" of thousands separator policy https://github.com/jqnatividad/qsv/pull/751
+* `applydp`: add round operation  https://github.com/jqnatividad/qsv/pull/752
+
+### Changed
+* changed MSRV policy to track latest Rust version in Homebrew, instead of latest Rust stable
+* removed excess trailing whitespace in `apply` & `applydp` usage text
+* moved `round_num` function from `stats.rs` to `util.rs` so it can be used in round operation in `apply` and `applydp`
+* cargo update bump dependencies, notably tokio from 1.24.2 to 1.25.0
+* pin Rust nightly to 2023-01-28
+
+### Fixed
+* `apply`: corrected thousands operation usage text - `hexfour` not `hex_four` https://github.com/jqnatividad/qsv/commit/6545aa2b3ce470b5f6c039c998e9f6fc21a6ad84
+
+
+**Full Changelog**: https://github.com/jqnatividad/qsv/compare/0.86.0...0.87.0
+
+
+## [0.86.0] - 2023-01-29
+
+### Added
+* `apply`: added `thousands` operation which adds thousands separators to numeric values.
+Specify the separator policy with --comparand (default: comma). The valid policies are:
+comma, dot, space, underscore, hexfour (place a space every four hex digits) and
+indiancomma (place a comma every two digits, except the last three digits). https://github.com/jqnatividad/qsv/pull/748
+* `searchset`: added `--unmatched-output` option. This was done to allow Datapusher+ to screen for PIIs more efficiently. Writing PII candidate records in one CSV file, and the "clean" records in another CSV in just one pass.  https://github.com/jqnatividad/qsv/pull/742
+
+
+### Changed
+* `fetch` & `fetchpost`: expanded usage text info on HTTP2 Adaptive Flow Control support
+* `fetchpost`: added more detail about `--compress` option
+* `stats`: added more tests
+* updated prebuilt zip archive READMEs https://github.com/jqnatividad/qsv/commit/072973efd7947a93773b2783d098eeace17d963d
+* Bump redis from 0.22.2 to 0.22.3 by @dependabot in https://github.com/jqnatividad/qsv/pull/741
+* Bump ahash from 0.8.2 to 0.8.3 by @dependabot in https://github.com/jqnatividad/qsv/pull/743
+* Bump jql from 5.1.4 to 5.1.6 by @dependabot in https://github.com/jqnatividad/qsv/pull/747
+* applied select clippy recommendations
+* cargo update bump several indirect dependencies
+* pin Rust nightly to 2023-01-27
+
+
+### Fixed
+* `stats`: fixed antimodes null display. Use the literal `NULL` instead of just "" when listing NULL as an antimode. https://github.com/jqnatividad/qsv/pull/745
+* `tojsonl`: fixed invalid escaping of JSON values https://github.com/jqnatividad/qsv/pull/746
+
+**Full Changelog**: https://github.com/jqnatividad/qsv/compare/0.85.0...0.86.0
+
+## [0.85.0] - 2023-01-22
+
+### Added
+* Update csvs_convert by @kindly in https://github.com/jqnatividad/qsv/pull/736
+* `sniff`: added `--delimiter` option https://github.com/jqnatividad/qsv/pull/732
+* `fetchpost`: add `--compress` option in https://github.com/jqnatividad/qsv/pull/737
+* `searchset`: several tweaks for PII screening requirement of Datapusher+. `--flag` option now shows regex labels instead of just row number; new `--flag-matches-only` option sends only matching rows to output when used with `--flag`; `--json` option returns rows_with_matches, total_matches and rowcount as json to stderr. https://github.com/jqnatividad/qsv/pull/738
+
+### Changed
+* `luau`: minor tweaks to increase code readability https://github.com/jqnatividad/qsv/commit/31d01c8b9eb1fe85262e9bf5fd237ae4493d562c
+* `stats`: now normalize after rounding. Normalizing strips trailing zeroes and converts -0.0 to 0.0. https://github.com/jqnatividad/qsv/commit/f838272b4deb79d25ca5704cf3c89652c0b9a3bb
+* `safenames`: mention CKAN-specific options https://github.com/jqnatividad/qsv/commit/f371ac25ba0c27e48b7b9b14a37dc47913cf0095
+* `fetch` & `fetchpost`: document decompression priority https://github.com/jqnatividad/qsv/commit/43ce13c4bf7eb23dc5d051d522d6d52d3cc255aa
+* Bump actix-governor from 0.3.2 to 0.4.0 by @dependabot in https://github.com/jqnatividad/qsv/pull/728
+* Bump sysinfo from 0.27.6 to 0.27.7 by @dependabot in https://github.com/jqnatividad/qsv/pull/730
+* Bump serial_test from 0.10.0 to 1.0.0 by @dependabot in https://github.com/jqnatividad/qsv/pull/729
+* Bump pyo3 from 0.17.3 to 0.18.0 by @dependabot in https://github.com/jqnatividad/qsv/pull/731
+* Bump reqwest from 0.11.13 to 0.11.14 by @dependabot in https://github.com/jqnatividad/qsv/pull/734
+* cargo update bump for other dependencies
+* pin Rust nightly to 2023-01-21
+
+### Fixed
+* `sniff`: now checks that `--sample` size is greater than zero https://github.com/jqnatividad/qsv/commit/cd4c390ce4322d7076866be27025d67800bc60e2
+
+**Full Changelog**: https://github.com/jqnatividad/qsv/compare/0.84.0...0.85.0
+
+## [0.84.0] - 2023-01-14
+
+### Added
+* `headers`: added `--trim` option to trim quote and spaces from headers https://github.com/jqnatividad/qsv/pull/726
+
+
+### Changed
+* `input`: `--trim-headers` option also removes excess quotes https://github.com/jqnatividad/qsv/pull/727
+* `safenames`: trim quotes and spaces from headers https://github.com/jqnatividad/qsv/commit/0260833bc8b36ea6e6ccb9e79687c76470a8a6b0
+* cargo update bump dependencies
+* pin Rust nightly to 2022-01-13
+
+
+**Full Changelog**: https://github.com/jqnatividad/qsv/compare/0.83.0...0.84.0
+
+## [0.83.0] - 2023-01-13
+
+### Added
+* `stats`: add sparsity to "streaming" statistics https://github.com/jqnatividad/qsv/pull/719
+* `schema`: also infer enum constraints for integer fields. Not only good for validation, this is also required by `tojsonl` for smarter boolean inferencing https://github.com/jqnatividad/qsv/pull/721
+
+### Changed
+* `stats`: change `--typesonly` so it will not automatically `--infer-dates`. Let the user decide. https://github.com/jqnatividad/qsv/pull/718
+* `stats`: if median is already known, use it to calculate Median Absolute Deviation https://github.com/jqnatividad/qsv/commit/08ed08da4651a96bf05372b34b670063fbcec14f
+* `tojsonl`: smarter boolean inferencing. It will infer a column as boolean if it only has a domain of two values,
+and the first character of the values are one of the following case-insensitive "truthy/falsy"
+combinations: t/f; t/null; 1/0; 1/null; y/n & y/null are treated as true/false. https://github.com/jqnatividad/qsv/pull/722 and https://github.com/jqnatividad/qsv/pull/723
+* `safenames`: process `--reserved` option before `--prefix` option. https://github.com/jqnatividad/qsv/commit/b333549199726a3e92b95fb1d501fbdbbeede34a
+* `strum` and `strum-macros` are no longer optional dependencies as we use it with all the binary variants now https://github.com/jqnatividad/qsv/commit/bea6e00fc400e8fafa2938832f8654d97c45fe34
+* Bump qsv-stats from 0.6.0 to 0.7.0
+* Bump sysinfo from 0.27.3 to 0.27.6
+* Bump hashbrown from 0.13.1 to 0.13.2 by @dependabot in https://github.com/jqnatividad/qsv/pull/720
+* Bump actions/setup-python from 4.4.0 to 4.5.0 by @dependabot in https://github.com/jqnatividad/qsv/pull/724
+* change MSRV from 1.66.0 to 1.66.1
+
+* cargo update bump indirect dependencies
+* pin Rust nightly to 2023-01-12
+
+### Fixed
+* `safenames`: fixed `--prefix` option. When checking for invalid underscore prefix, it was checking for hyphen, not underscore, causing a problem with Datapusher+ https://github.com/jqnatividad/qsv/commit/4fbbfd3a479b6678fa9d4c823fd00b592b326c7a
+
+
+**Full Changelog**: https://github.com/jqnatividad/qsv/compare/0.82.0...0.83.0
+
+
+## [0.82.0] - 2023-01-09
+
+### Added
+* `diff`: Find the difference between two CSVs ludicrously fast! by @janriemer in https://github.com/jqnatividad/qsv/pull/711
+* `stats`: added [Median Absolute Deviation](https://en.wikipedia.org/wiki/Median_absolute_deviation) (MAD) https://github.com/jqnatividad/qsv/pull/715
+* added Testing section to README https://github.com/jqnatividad/qsv/commit/517d69b496aaa9535a2b23b05e44a5999d8ef994
+
+### Changed
+* `validate`: schema less validation error improvements https://github.com/jqnatividad/qsv/pull/703
+* `stats`: faster date inferencing https://github.com/jqnatividad/qsv/pull/706
+* `stats`: minor performance tweaks https://github.com/jqnatividad/qsv/commit/15e6284c20cccf4a6b74498336d31b0d7ba03285 https://github.com/jqnatividad/qsv/commit/3f0ed2b314765a546e28b534d5e82bff892592c3
+* `stats`: refactored modes compilation https://github.com/jqnatividad/qsv/commit/6e448b041a2c78b3ce1cc89aadaff4a8d1081472
+* `stats`: simplify if condition https://github.com/jqnatividad/qsv/commit/ae7cc85afe1dc4c3f87cbefe3b14dc93b28d94e9
+* `luau`: show luau version when invoking --version https://github.com/jqnatividad/qsv/commit/f7f9c4297fb3dea685b5d0f631932b6b2ca4a99a
+* `excel`: add "sheet" suffix to end msg for readability https://github.com/jqnatividad/qsv/commit/ae3a8e31784a24c8492de76c5074e477cc474063
+* cache `util::count_rows` result, so if a CSV without an index is queried, it caches the result and future calls to count_rows in the same session will be instantaneous https://github.com/jqnatividad/qsv/commit/e805dedf5674cfbc56d9948791419ac6fd51f2fd
+* Bump console from 0.15.3 to 0.15.4 by @dependabot in https://github.com/jqnatividad/qsv/pull/704
+* Bump cached from 0.41.0 to 0.42.0 by @dependabot in https://github.com/jqnatividad/qsv/pull/709
+* Bump mlua from 0.8.6 to 0.8.7 by @dependabot in https://github.com/jqnatividad/qsv/pull/712
+* Bump qsv-stats from 0.5.2 to 0.6.0 with the new MAD statistic support
+* cargo update bump dependencies - notably mimalloc from 0.1.32 to 0.1.34, luau0-src from 0.4.1_luau553 to 0.5.0_luau555, csvs_convert from 0.7.9 to 0.7.11 and regex from 1.7.0 to 1.7.1
+* pin Rust nightly to 2023-01-08
+
+### Fixed
+* `tojsonl`: fix escaping of unicode string. Replace hand-rolled escape fn with built-in escape_default fn https://github.com/jqnatividad/qsv/pull/707. Fixes https://github.com/jqnatividad/qsv/issues/705
+* `tojsonl`: more robust boolean inferencing https://github.com/jqnatividad/qsv/pull/710. Fixes https://github.com/jqnatividad/qsv/issues/708
+
+
+## New Contributors
+* @janriemer made their first contribution in https://github.com/jqnatividad/qsv/pull/711
+
+**Full Changelog**: https://github.com/jqnatividad/qsv/compare/0.81.0...0.82.0
+
+## [0.81.0] - 2023-01-02
+
+### Added
+* `stats`: added range statistic https://github.com/jqnatividad/qsv/pull/691
+* `stats`: added additional mode stats. For mode, added mode_count and mode_occurrences. Added "antimode" (opposite of mode - least frequently occurring non-zero value), antimode_count and antimode_occurrences. https://github.com/jqnatividad/qsv/pull/694
+* qsv-dateparser now recognizes unix timestamp values with fractional seconds to nanosecond precision as dates. `stats`, `sniff`, `apply datefmt` and `schema`, which all use qsv-dateparser, now infer unix timestamps as dates - https://github.com/jqnatividad/qsv/commit/a29ff8ea255d5aed9992556a0a23ab76117c8340 https://github.com/jqnatividad/qsv/pull/702
+> USAGE NOTE: As timestamps can be float or integer, and data type inferencing will guess dates last, preprocess timestamp columns with apply datefmt first to more date-like, non-timestamp formats, so they are recognized as dates by other qsv commands.
+
+### Changed
+* `apply`: document numtocurrency --comparand & --replacement behavior https://github.com/jqnatividad/qsv/commit/cc88fe921d8cdf7eedcb0008e16ebb5c46744f33
+* `index`: explicitly flush buffers after creating index https://github.com/jqnatividad/qsv/commit/ee5d790af1cde73dfc57b028bf52fa88e83cdaa4
+* `sample`: no longer requires an index to do percentage sampling https://github.com/jqnatividad/qsv/commit/45d4657713ebe2ae8388ce55f4cb1a733e727024
+* `slice`: removed unneeded utf8 check https://github.com/jqnatividad/qsv/commit/5a199f4442bd025cec31309bee44ac71bacbdfaa
+* `schema`: expand usage text regarding `--strict-dates` https://github.com/jqnatividad/qsv/commit/3d22829f3cf0441961e854555cd0c333bcb3ffb1 
+* `stats`: date stats refactor. Date stats are returned in rfc3339 format. Dates are converted to timestamps with millisecond precision while calculating date stats. https://github.com/jqnatividad/qsv/pull/690 https://github.com/jqnatividad/qsv/commit/e7c297795ff5e82cf1dc242090be11ecced6da9a
+* filter out variance/stddev in tests as float precision issues are causing flaky CI tests  https://github.com/jqnatividad/qsv/pull/696
+* Bump qsv-dateparser from 0.4.4 to 0.6.0
+* Bump qsv-stats from 0.4.6 to 0.5.2
+* Bump qsv-sniffer from 0.5.0 to 0.6.0
+* Bump serde from 1.0.151 to 1.0.152 by @dependabot in https://github.com/jqnatividad/qsv/pull/692
+* Bump csvs_convert from 0.7.7 to 0.7.8 by @dependabot in https://github.com/jqnatividad/qsv/pull/693
+* Bump once_cell from 0.16.0 to 0.17.0 https://github.com/jqnatividad/qsv/commit/d3ac2556c74e2ddd66dcee00e5e836d284b662a7
+* Bump self-update from 0.32.0 to 0.34.0 https://github.com/jqnatividad/qsv/commit/5f95933f01e2e0c592b52d7424b6a832aafd3591
+* Bump cpc from 1.8 to 1.9; set csvs_convert dependency to minor version https://github.com/jqnatividad/qsv/commit/ee9164810559f5496dfafba0e789b9cd84000a17
+* applied select clippy recommendations
+* deeplink to Cookbook from Table of Contents
+* pin Rust nightly to 2023-01-01
+* implementation comments on `stats`, `sample`, `sort` & Python distribution
+
+### Fixed
+* `stats`: prevent premature rounding, and make sum statistic use the same rounding method https://github.com/jqnatividad/qsv/commit/879214a1f3032f140f0207fe8807e1bb641110d7 https://github.com/jqnatividad/qsv/commit/1a1362031de8973b623598748bea4bc5fc6e08d3
+* fix autoindex so we return the index path properly https://github.com/jqnatividad/qsv/commit/d3ce6a3918683d66bf0f3246c7d6e8518eead392
+* `fetch` & `fetchpost`: corrected typo https://github.com/jqnatividad/qsv/commit/684036bbc237d5b80ea060f9ee8b8d46c1a2ad88
+
+
+**Full Changelog**: https://github.com/jqnatividad/qsv/compare/0.80.0...0.81.0
+
 ## [0.80.0] - 2022-12-23
 
 ### Added

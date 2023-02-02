@@ -64,7 +64,7 @@ use crate::{
 
 type ByteString = Vec<u8>;
 type BoxedWriter = csv::Writer<Box<dyn io::Write + 'static>>;
-type BoxedReader = csv::Reader<Box<dyn io::Read + 'static>>;
+type BoxedReader = csv::Reader<Box<dyn io::Read + Send + 'static>>;
 
 #[derive(Deserialize)]
 struct Args {
@@ -116,8 +116,7 @@ struct ByteRecord(Vec<ByteString>);
 
 impl<'a> From<&'a csv::ByteRecord> for ByteRecord {
     fn from(record: &'a csv::ByteRecord) -> Self {
-        #[allow(clippy::redundant_closure_for_method_calls)]
-        ByteRecord(record.iter().map(|f| f.to_vec()).collect())
+        ByteRecord(record.iter().map(<[u8]>::to_vec).collect())
     }
 }
 
